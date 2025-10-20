@@ -23,3 +23,13 @@
   line-height: 18px;
   color: #555;
 }
+
+/* Popup styling for jobs hover chart */
+.maplibregl-popup.jobs-popup .maplibregl-popup-content {
+  padding: 8px 8px;
+  max-width: 280px;
+  overflow: hidden; /* ensure chart never paints outside popup */
+}
+.maplibregl-popup.jobs-popup {
+  pointer-events: none; /* keep hover interaction smooth */
+}

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import './map.css';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -27,6 +28,19 @@ const InteractiveDescription = ({ text, keywords, colors, onKeywordHover, onKeyw
           const inner = part.substring(2, part.length - 2);
           const kw = keywords.find(kw => kw.toLowerCase() === inner.toLowerCase());
           if (kw) {
+            const isYear = /^\d{4}$/.test(kw);
+            if (isYear) {
+              return (
+                <a
+                  key={index}
+                  href="#"
+                  style={{ color: '#2563EB', textDecoration: 'underline', cursor: 'pointer', fontWeight: 700 }}
+                  onClick={(e) => { e.preventDefault(); onKeywordClick && onKeywordClick(kw); }}
+                >
+                  {inner}
+                </a>
+              );
+            }
             // Treat bolded keywords as interactive too
             return (
               <strong
@@ -46,12 +60,55 @@ const InteractiveDescription = ({ text, keywords, colors, onKeywordHover, onKeyw
               </strong>
             );
           }
-          return <strong key={index}>{inner}</strong>;
+          // If bolded text contains available years (e.g., "2011-2021"), make those year substrings clickable
+          const yearRegex = /(19\d{2}|20\d{2})/g;
+          const chunks = [];
+          let lastIndex = 0; let m;
+          while ((m = yearRegex.exec(inner)) !== null) {
+            const y = m[0];
+            // Push preceding text
+            if (m.index > lastIndex) chunks.push(inner.slice(lastIndex, m.index));
+            // If this year is in keywords (i.e., one of available years), make it a link; else keep as text
+            if (keywords.includes(y)) {
+              chunks.push(
+                <a
+                  key={`b-${index}-${m.index}`}
+                  href="#"
+                  style={{ color: '#2563EB', textDecoration: 'underline', cursor: 'pointer', fontWeight: 700 }}
+                  onClick={(e) => { e.preventDefault(); onKeywordClick && onKeywordClick(y); }}
+                >
+                  {y}
+                </a>
+              );
+            } else {
+              chunks.push(y);
+            }
+            lastIndex = m.index + y.length;
+          }
+          if (lastIndex < inner.length) chunks.push(inner.slice(lastIndex));
+          return (
+            <strong key={index}>
+              {chunks.length ? chunks : inner}
+            </strong>
+          );
         }
 
         // Next, check if the part is an interactive keyword.
         const originalKeyword = keywords.find(kw => kw.toLowerCase() === part.toLowerCase());
         if (originalKeyword) {
+          const isYear = /^\d{4}$/.test(originalKeyword);
+          if (isYear) {
+            return (
+              <a
+                key={index}
+                href="#"
+                style={{ color: '#2563EB', textDecoration: 'underline', cursor: 'pointer', fontWeight: 600 }}
+                onClick={(e) => { e.preventDefault(); onKeywordClick && onKeywordClick(originalKeyword); }}
+              >
+                {part}
+              </a>
+            );
+          }
           return (
             <strong
               key={index}
@@ -122,6 +179,7 @@ export default function Map() {
   const chartRef = useRef(null); // Ref for the jobs chart (for PDF export)
   const hoverStateBySource = useRef({}); // track hovered feature ids per source for outlines
   const selectedStateBySource = useRef({}); // track selected feature ids per source for outlines
+  const jobsPopupRef = useRef(null); // popup for hover charts
 
   // Definitions for interactive text highlighting
   const PRECINCT_NAMES = ['Montague', 'Sandridge', 'Lorimer', 'Wirraway', 'Employment Precinct'];
@@ -436,6 +494,61 @@ export default function Map() {
     return out;
   };
 
+  // Build an SVG string for the jobs chart (for popup), consistent with panel chart styles
+  const buildJobsChartSVG = (vals) => {
+    if (!vals) return '';
+    const data = [
+      { year: 2011, value: vals[2011] || 0 },
+      { year: 2016, value: vals[2016] || 0 },
+      { year: 2021, value: vals[2021] || 0 },
+    ];
+  // Dimensions/padding: keep chart close to left while leaving space for y tick labels and title
+  const width = 200, height = 170, pad = { l: 55, r: 10, t: 22, b: 46 };
+    const fallbackMax = Math.max(1, ...data.map(d => d.value));
+    const axisMax = (jobsMax && isFinite(jobsMax)) ? jobsMax : fallbackMax;
+    const barW = (width - pad.l - pad.r) / data.length * 0.45;
+    const xStep = (width - pad.l - pad.r) / data.length;
+    const yScale = (v) => pad.t + (height - pad.t - pad.b) * (1 - (axisMax ? v / axisMax : 0));
+
+    const yGrids = Array.from({ length: 5 }).map((_, i) => {
+      const v = (axisMax / 4) * i; const y = yScale(v);
+      return `\n      <g>\n        <line x1="${pad.l}" x2="${width - pad.r}" y1="${y}" y2="${y}" stroke="#f1f3f5" />\n        <text x="${pad.l - 6}" y="${y + 4}" font-size="11" text-anchor="end" fill="#6c757d">${Math.round(v).toLocaleString()}</text>\n      </g>`;
+    }).join('');
+    const yAxisLine = `\n      <line x1="${pad.l}" x2="${pad.l}" y1="${pad.t}" y2="${height - pad.b}" stroke="#adb5bd" />`;
+
+  // x-axis tick labels (years)
+  const xLabels = data.map((d, idx) => `\n      <text x="${pad.l + idx * xStep + xStep / 2}" y="${height - 26}" font-size="12" text-anchor="middle" fill="#374151">${d.year}</text>`).join('');
+  // x-axis title centered under tick labels
+  const xAxisTitle = `\n      <text x="${pad.l + (width - pad.l - pad.r) / 2}" y="${height - 10}" font-size="11" text-anchor="middle" fill="#495057">Year</text>`;
+
+    const bars = data.map((d, idx) => {
+      const x = pad.l + idx * xStep + (xStep - barW) / 2;
+  const y = yScale(d.value);
+  let h = Math.max(0, height - pad.b - y);
+  // Ensure tiny non-zero bars remain visible
+  if (d.value > 0 && h > 0 && h < 2) h = 2;
+      const isActive = selectedYear === d.year;
+      const fill = isActive ? '#2563EB' : '#94a3b8';
+      return `\n      <g>\n        <rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="${fill}" rx="3" />\n        <title>${d.year}: ${d.value.toLocaleString()}</title>\n      </g>`;
+    }).join('');
+
+    return `\n    <svg width="${width}" height="${height}" style="display:block;background:#fff;border:1px solid #e9ecef;border-radius:6px">\n      <!-- y-axis title rotated and placed in left margin; moved further left to avoid tick value overlap -->\n      <text x="${pad.l - 44}" y="${(height - pad.b + pad.t) / 2}" transform="rotate(-90 ${pad.l - 44} ${(height - pad.b + pad.t) / 2})" font-size="11" text-anchor="middle" fill="#495057">Total jobs (count)</text>\n      ${yAxisLine}\n      ${yGrids}\n      ${xLabels}\n      ${xAxisTitle}\n      ${bars}\n    </svg>`;
+  };
+
+  // Refresh hover popup content when selected year changes to update the highlighted bar
+  useEffect(() => {
+    if (!jobsPopupRef.current) return;
+    if (!hoveredDZNJobs) return;
+    try {
+      const title = 'Total jobs by year';
+      const svg = buildJobsChartSVG(hoveredDZNJobs);
+  const container = document.createElement('div');
+  container.style.maxWidth = '280px';
+      container.innerHTML = `\n        <div style="font-weight:600;color:#374151;font-size:0.95rem;margin-bottom:4px">${title}</div>\n        ${svg}\n      `;
+      jobsPopupRef.current.setDOMContent(container);
+    } catch (_) { /* ignore */ }
+  }, [selectedYear, hoveredDZNJobs]);
+
   // --- HOOKS for Map Lifecycle & Effects ---
 
   // Main Map Initialization
@@ -585,6 +698,21 @@ export default function Map() {
               if (c) {
                 const vals = computeJobsForPoint(c[0], c[1]);
                 setHoveredDZNJobs(vals);
+                // Create/update a popup with the hover chart (no ID in title)
+                const title = 'Total jobs by year';
+                const svg = buildJobsChartSVG(vals);
+                const container = document.createElement('div');
+                container.style.maxWidth = '280px';
+                // do not set overflow here; CSS will enforce hidden to keep content within popup
+                container.innerHTML = `\n                  <div style="font-weight:600;color:#374151;font-size:0.95rem;margin-bottom:4px">${title}</div>\n                  ${svg}\n                `;
+                if (!jobsPopupRef.current) {
+                  jobsPopupRef.current = new maplibregl.Popup({ closeButton: false, closeOnClick: false, className: 'jobs-popup' })
+                    .setLngLat(e.lngLat)
+                    .setDOMContent(container)
+                    .addTo(map.current);
+                } else {
+                  jobsPopupRef.current.setLngLat(e.lngLat).setDOMContent(container);
+                }
               }
               // Get the DZN code for label from current layer's year-specific property
               const yearMatch = layer.id.match(/(2011|2016|2021)/);
@@ -613,6 +741,8 @@ export default function Map() {
           if (layer.indicatorName === 'Number of jobs') {
             setHoveredDZNJobs(null);
             setHoveredDZNCode('');
+            // Remove popup on leave
+            try { if (jobsPopupRef.current) { jobsPopupRef.current.remove(); jobsPopupRef.current = null; } } catch (_) {}
           }
           // Hide dim mask when leaving layer
           if (map.current.getLayer(dimMaskId)) {
@@ -795,6 +925,11 @@ export default function Map() {
       }
     });
   }, [selectedIndicator, mapLoaded, layersReady]);
+
+  // Close hover popup when switching indicator or year to prevent stale popups
+  useEffect(() => {
+    try { if (jobsPopupRef.current) { jobsPopupRef.current.remove(); jobsPopupRef.current = null; } } catch (_) {}
+  }, [selectedIndicator, selectedYear]);
 
   // Derive available years from metadata when panel focus changes (for jobs indicator and precinct view)
   useEffect(() => {
@@ -1542,8 +1677,9 @@ Synthesize this information into an engaging and informative paragraph of about 
   
   // Helper to render description with dynamic keywords (precincts + years)
   const renderInteractiveDescription = () => {
-    const yearStrings = (panelFocus && panelFocus.name === 'Number of jobs' && availableYears.length)
-      ? availableYears.map(y => String(y))
+    // Only make years clickable if they are available in data (e.g., 2011, 2016, 2021)
+    const yearStrings = ((panelFocus && ((panelFocus.type === 'indicator' && panelFocus.name === 'Number of jobs') || panelFocus.type === 'precinct')) && availableYears.length)
+      ? availableYears.map(String)
       : [];
     const keywords = [...PRECINCT_NAMES, ...yearStrings];
     const colors = { ...PRECINCT_COLORS };
@@ -1557,13 +1693,23 @@ Synthesize this information into an engaging and informative paragraph of about 
       }
     };
     const onKwClick = (kw) => {
-      if (yearStrings.includes(kw)) {
-        setSelectedYear(parseInt(kw, 10));
+      if (/^\d{4}$/.test(kw)) {
+        const y = parseInt(kw, 10);
+        const years = (availableYears && availableYears.length) ? availableYears : [2011, 2016, 2021];
+        if (years.includes(y)) {
+          setSelectedYear(y);
+        }
+        return;
       }
     };
+    // If dynamic text doesn't include any year strings, append an 'Available years' line to ensure clickable links exist
+  const textHasYear = yearStrings.some(y => dynamicDescription && dynamicDescription.includes(y));
+    const augmentedText = (!textHasYear && yearStrings.length)
+      ? `${dynamicDescription ? dynamicDescription + '\n\n' : ''}Available years: ${yearStrings.map(y => `**${y}**`).join(', ')}`
+      : dynamicDescription;
     return (
       <InteractiveDescription
-        text={dynamicDescription}
+        text={augmentedText}
         keywords={keywords}
         colors={colors}
         onKeywordHover={onKwHover}
@@ -1645,103 +1791,13 @@ Synthesize this information into an engaging and informative paragraph of about 
                   renderInteractiveDescription()
                 )}
                 {/* (chart moved to bottom section) */}
-                {/* Year selector chips (click to switch) */}
-                {((panelFocus.type === 'indicator' && panelFocus.name === 'Number of jobs') || panelFocus.type === 'precinct') && availableYears.length > 0 && (
-                  <div style={{ marginTop: '0.75rem' }}>
-                    <div style={{ fontSize: '0.9rem', color: '#495057', marginBottom: '0.25rem' }}>Select a year:</div>
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      {availableYears.map((y) => {
-                        const fallback = availableYears.includes(2011) ? 2011 : Math.max(...availableYears);
-                        const isActive = (selectedYear || fallback) === y;
-                        return (
-                          <button
-                            key={y}
-                            onClick={() => setSelectedYear(y)}
-                            style={{
-                              padding: '4px 10px',
-                              borderRadius: '16px',
-                              border: isActive ? '2px solid #2563EB' : '1px solid #dee2e6',
-                              backgroundColor: isActive ? '#eaf1fe' : '#ffffff',
-                              cursor: 'pointer',
-                              fontWeight: isActive ? 700 : 500
-                            }}
-                          >
-                            {y}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
+                {/* Year selector chips removed: years are clickable links in description now */}
             </div>
             ) : (
             <p style={{ fontSize: '0.95rem', color: '#6c757d', fontStyle: 'italic' }}>Select an indicator from the left panel or click on a precinct on the map to see its description.</p>
             )}
         </div>
-        {/* DZN analytics: prefer selected (click) then hover for Number of jobs */}
-        {panelFocus && panelFocus.type === 'indicator' && panelFocus.name === 'Number of jobs' && (
-          <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #dee2e6' }}>
-            <div ref={chartRef}>
-              {(selectedDZNJobs || hoveredDZNJobs) ? (
-                (() => {
-                  const src = selectedDZNJobs || hoveredDZNJobs;
-                  const data = [
-                    { year: 2011, value: src[2011] || 0 },
-                    { year: 2016, value: src[2016] || 0 },
-                    { year: 2021, value: src[2021] || 0 },
-                  ];
-                  const width = 260, height = 160, pad = { l: 64, r: 12, t: 12, b: 28 };
-
-                  // Consistent axis domain across all charts/years: 0 -> global jobsMax
-                  const fallbackMax = Math.max(1, ...data.map(d => d.value));
-                  const axisMax = (jobsMax && isFinite(jobsMax)) ? jobsMax : fallbackMax;
-
-                  const barW = (width - pad.l - pad.r) / data.length * 0.45;
-                  const xStep = (width - pad.l - pad.r) / data.length;
-                  const yScale = (v) => pad.t + (height - pad.t - pad.b) * (1 - v / axisMax);
-                  const dznLabel = selectedDZNCode || hoveredDZNCode;
-                  const title = dznLabel ? `Total jobs by year` : 'Total jobs by year';
-                  const yAxisLabel = (legendData['Total jobs'] && legendData['Total jobs'].title) || 'Total jobs (count)';
-                  return (
-                    <div>
-                      <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#374151', marginBottom: '0.25rem' }}>{title}</div>
-                      <svg width={width} height={height} style={{ background: '#fff', border: '1px solid #e9ecef', borderRadius: 6 }}>
-                        <text x={pad.l - 44} y={height / 2} transform={`rotate(-90 ${pad.l - 44} ${height / 2})`} fontSize={11} textAnchor="middle" fill="#495057">{yAxisLabel}</text>
-                        {Array.from({ length: 5 }).map((_, i) => {
-                          const v = (axisMax / 4) * i; const y = yScale(v);
-                          return (
-                            <g key={i}>
-                              <line x1={pad.l} x2={width - pad.r} y1={y} y2={y} stroke="#f1f3f5" />
-                              <text x={pad.l - 8} y={y + 4} fontSize={11} textAnchor="end" fill="#6c757d">{Math.round(v).toLocaleString()}</text>
-                            </g>
-                          );
-                        })}
-                        {data.map((d, idx) => (
-                          <text key={`x-${d.year}`} x={pad.l + idx * xStep + xStep / 2} y={height - 6} fontSize={11} textAnchor="middle" fill="#6c757d">{d.year}</text>
-                        ))}
-                        {data.map((d, idx) => {
-                          const x = pad.l + idx * xStep + (xStep - barW) / 2;
-                          const y = yScale(d.value);
-                          const h = height - pad.b - y;
-                          const isActive = selectedYear === d.year;
-                          const fill = isActive ? '#2563EB' : '#94a3b8';
-                          return (
-                            <g key={`b-${d.year}`}>
-                              <rect x={x} y={y} width={barW} height={Math.max(0, h)} fill={fill} rx={3} />
-                              <title>{`${d.year}: ${d.value.toLocaleString()}`}</title>
-                            </g>
-                          );
-                        })}
-                      </svg>
-                    </div>
-                  );
-                })()
-              ) : (
-                <div style={{ fontSize: '0.9rem', color: '#6c757d' }}>Click or hover a DZN on the map to see jobs over time.</div>
-              )}
-            </div>
-          </div>
-        )}
+        {/* Chart moved to map popup on hover; right panel visualization removed as requested */}
 
         {/* --- PDF Export Button --- */}
         {panelFocus && (
@@ -1766,6 +1822,28 @@ Synthesize this information into an engaging and informative paragraph of about 
           </div>
         )}
       </div>
+      {/* Hidden offscreen chart container for PDF export (kept out of view) */}
+      {panelFocus && panelFocus.type === 'indicator' && panelFocus.name === 'Number of jobs' && (
+        <div
+          ref={chartRef}
+          style={{ position: 'absolute', left: -10000, top: -10000, width: 280, height: 180, visibility: 'hidden' }}
+          aria-hidden="true"
+        >
+          {(() => {
+            const src = selectedDZNJobs || hoveredDZNJobs;
+            if (!src) return null;
+            const svg = buildJobsChartSVG(src);
+            const title = 'Total jobs by year';
+            return (
+              <div
+                dangerouslySetInnerHTML={{
+                  __html: `\n                    <div style=\"font-weight:600;color:#374151;font-size:0.95rem;margin-bottom:4px\">${title}</div>\n                    ${svg}\n                  `,
+                }}
+              />
+            );
+          })()}
+        </div>
+      )}
     </div>
   );
 }
