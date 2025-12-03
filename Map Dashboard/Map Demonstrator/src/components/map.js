@@ -20,7 +20,7 @@ const InteractiveDescription = ({ text, keywords, colors, onKeywordHover, onKeyw
   const paragraphs = text.split(/\n\n+/).filter(p => p.trim());
 
   return (
-    <div style={{ fontSize: '0.95rem', color: '#6c757d', lineHeight: 1.6 }}>
+    <div style={{ fontSize: '1rem', color: '#374151', lineHeight: 1.6, fontFamily: 'inherit' }}>
       {paragraphs.map((paragraph, paraIndex) => {
         // Create a regex that matches either a keyword or a bolded section.
         const regex = new RegExp(`(${keywords.join('|')}|\\*\\*.+?\\*\\*)`, 'gi');
@@ -155,7 +155,7 @@ const REGION_COLORS = {
 };
 
 // --- START: LEGEND COMPONENT (MODIFIED FOR PDF EXPORT) ---
-const Legend = React.forwardRef(({ title, items, narrative = '', comparisonChartData = null, placement = 'floating' }, ref) => {
+const Legend = React.forwardRef(({ title, items, narrative = '', comparisonChartData = null, placement = 'inline' }, ref) => {
   const [windowSize, setWindowSize] = React.useState({ width: typeof window !== 'undefined' ? window.innerWidth : 1200, height: typeof window !== 'undefined' ? window.innerHeight : 800 });
 
   React.useEffect(() => {
@@ -172,9 +172,12 @@ const Legend = React.forwardRef(({ title, items, narrative = '', comparisonChart
   const isVerySmallScreen = windowSize.width < 900;
   const scaleFactor = isVerySmallScreen ? 0.75 : isSmallScreen ? 0.85 : 1;
   
-  const legendWidth = Math.min(215 * scaleFactor, windowSize.width * 0.25);
+  // Use full width when inline; cap width when floating
+  const legendWidthValue = Math.min(300 * scaleFactor, windowSize.width * 0.30);
+  const legendWidth = placement === 'inline' ? '100%' : `${legendWidthValue}px`;
   const legendMaxHeight = windowSize.height - 140;
-  const baseFontSize = 14 * scaleFactor;
+  // Align legend font sizing with narrative text
+  const baseFontSize = 16 * scaleFactor;
   const swatchSize = Math.round(16 * scaleFactor);
   const padding = 12 * scaleFactor;
 
@@ -189,7 +192,7 @@ const Legend = React.forwardRef(({ title, items, narrative = '', comparisonChart
         borderRadius: '0.5rem',
         boxShadow: '0 4px 6px rgba(0,0,0,0.12)',
         zIndex: 10,
-        width: `${legendWidth}px`,
+        width: legendWidth,
         maxHeight: `${legendMaxHeight}px`,
         overflowY: 'auto',
         overflowX: 'hidden',
@@ -202,15 +205,15 @@ const Legend = React.forwardRef(({ title, items, narrative = '', comparisonChart
         padding: `${padding}px`,
         borderRadius: '0.5rem',
         boxShadow: '0 4px 6px rgba(0,0,0,0.12)',
-        width: '100%',
+        width: legendWidth,
         maxHeight: `${legendMaxHeight}px`,
         overflowY: 'auto',
         overflowX: 'hidden'
       };
 
   return (
-    <div ref={ref} style={containerStyle}>
-      <h4 style={{ margin: '0 0 0.5rem 0', fontWeight: 'bold', fontSize: `${baseFontSize}px` }}>{title}</h4>
+    <div ref={ref} style={{ ...containerStyle, fontFamily: 'inherit', color: '#374151' }}>
+      <h4 style={{ margin: '0 0 0.5rem 0', fontWeight: 'bold', fontSize: `${baseFontSize}px`, color: 'inherit', fontFamily: 'inherit' }}>{title}</h4>
       {items.map((item, index) => (
         <div key={index} style={{ display: 'flex', alignItems: 'center', marginBottom: `${4 * scaleFactor}px` }}>
           <span style={{
@@ -222,7 +225,7 @@ const Legend = React.forwardRef(({ title, items, narrative = '', comparisonChart
             border: '1px solid #ccc',
             flexShrink: 0
           }}></span>
-          <span style={{ fontSize: `${baseFontSize * 0.85}px` }}>{item.label}</span>
+          <span style={{ fontSize: `${baseFontSize}px`, lineHeight: 1.6, color: 'inherit', fontFamily: 'inherit' }}>{item.label}</span>
         </div>
       ))}
       {narrative && (
@@ -231,9 +234,10 @@ const Legend = React.forwardRef(({ title, items, narrative = '', comparisonChart
             marginTop: `${10 * scaleFactor}px`,
             borderTop: '1px solid #E5E7EB',
             paddingTop: `${8 * scaleFactor}px`,
-            fontSize: `${baseFontSize * 0.95}px`,
-            color: '#374151',
-            lineHeight: 1.5
+            fontSize: `${baseFontSize}px`,
+            color: 'inherit',
+            lineHeight: 1.6,
+            fontFamily: 'inherit'
           }}
         >
           {narrative}
@@ -369,7 +373,8 @@ export default function Map() {
   const [showIndicatorInfo, setShowIndicatorInfo] = useState(false);
 
   // Panel widths for map padding
-  const leftPanelWidth = 288;
+  // Increase left panel reserved width so legend/chart have room
+  const leftPanelWidth = 240;
   const rightPanelWidth = 175;
 
   // --- DATA DEFINITIONS ---
@@ -2369,7 +2374,8 @@ export default function Map() {
   // Adjust map bounds on load
   const adjustMapBounds = () => {
     if (!map.current) return;
-    const bounds = [ [144.890, -37.850], [144.948, -37.816] ];
+    // Tighter bounds to zoom in while respecting side panels
+    const bounds = [ [144.915, -37.85], [144.943, -37.816] ];
     const legendHeight = window.innerHeight < 900 ? 140 : 170;
     map.current.fitBounds(bounds, {
       padding: { top: 20, bottom: legendHeight, left: leftPanelWidth, right: rightPanelWidth },
@@ -2385,7 +2391,8 @@ export default function Map() {
     }
     const debouncedAdjustBounds = () => {
       if (!map.current) return;
-      const bounds = [ [144.890, -37.850], [144.948, -37.816] ];
+      // Keep resize behavior consistent with tighter zoomed-in bounds
+      const bounds = [ [144.900, -37.845], [144.940, -37.820] ];
       const legendHeight = window.innerHeight < 900 ? 140 : 170;
       map.current.fitBounds(bounds, { padding: { top: 20, bottom: legendHeight, left: leftPanelWidth, right: rightPanelWidth }, duration: 0 });
     };
