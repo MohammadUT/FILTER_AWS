@@ -3563,6 +3563,8 @@ Do not invent or infer any data values, statistics, or trends.`;
         }
       } catch (_) { /* non-fatal */ }
       setIndicators(rankedIndicators);
+      // Auto-open the info box to show top 3 suggestions after a search
+      setShowIndicatorInfo(true);
 
     } catch (error) {
       console.error("Failed to fetch indicators:", error);
@@ -4872,7 +4874,7 @@ Do not invent or infer any data values, statistics, or trends.`;
     legendComparisonText;
   const comparisonNarrativeText = shouldShowComparisonNarrative
     ? legendComparisonText
-    : 'Select an indicator to view the Fishermans Bend vs Docklands narrative.';
+    : 'Select \'Number of jobs\' or \'Industry specialisation\' indicators to see comparison narrative with Docklands.';
 
   // --- RENDER METHOD ---
   return (
