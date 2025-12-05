@@ -254,7 +254,7 @@ const Legend = React.forwardRef(({ title, items, narrative = '', comparisonChart
                         <div>
                           <div style={{ fontSize: `${baseFontSize * 0.9}px`, color: '#111827', marginBottom: `${3 * scaleFactor}px` }}>{r.name}</div>
                           <div style={{ backgroundColor: '#E5E7EB', borderRadius: 999, height: barHeight, overflow: 'hidden' }}>
-                            <span style={{ display: 'block', height: '100%', width: `${widthPct}%`, backgroundColor: '#2563EB' }}></span>
+                            <span style={{ display: 'block', height: '100%', width: `${widthPct}%`, backgroundColor: '#DC2626' }}></span>
                           </div>
                         </div>
                         <div style={{ fontSize: `${baseFontSize * 0.9}px`, color: '#374151', minWidth: Math.round(40 * scaleFactor), textAlign: 'right' }}>
@@ -5273,7 +5273,7 @@ Do not invent or infer any data values, statistics, or trends.`;
               onClick={handleExportToPDF} 
               disabled={isExporting} 
               style={{ 
-                backgroundColor: '#17A2B8', 
+                backgroundColor: '#2563EB', 
                 color: 'white', 
                 width: '100%',
                 fontWeight: 600, 
