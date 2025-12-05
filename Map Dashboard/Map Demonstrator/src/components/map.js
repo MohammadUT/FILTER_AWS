@@ -155,7 +155,7 @@ const REGION_COLORS = {
 };
 
 // --- START: LEGEND COMPONENT (MODIFIED FOR PDF EXPORT) ---
-const Legend = React.forwardRef(({ title, items, narrative = '', comparisonChartData = null, placement = 'inline' }, ref) => {
+const Legend = React.forwardRef(({ title, items, narrative = '', comparisonChartData = null, placement = 'inline', topIndustriesByYear = null, selectedYear = null }, ref) => {
   const [windowSize, setWindowSize] = React.useState({ width: typeof window !== 'undefined' ? window.innerWidth : 1200, height: typeof window !== 'undefined' ? window.innerHeight : 800 });
 
   React.useEffect(() => {
@@ -206,8 +206,9 @@ const Legend = React.forwardRef(({ title, items, narrative = '', comparisonChart
         borderRadius: '0.5rem',
         boxShadow: '0 4px 6px rgba(0,0,0,0.12)',
         width: legendWidth,
-        maxHeight: `${legendMaxHeight}px`,
-        overflowY: 'auto',
+        // Allow full content height in panel without internal scrolling
+        maxHeight: 'none',
+        overflowY: 'visible',
         overflowX: 'hidden'
       };
 
@@ -229,19 +230,80 @@ const Legend = React.forwardRef(({ title, items, narrative = '', comparisonChart
         </div>
       ))}
       {narrative && (
-        <p
-          style={{
-            marginTop: `${10 * scaleFactor}px`,
-            borderTop: '1px solid #E5E7EB',
-            paddingTop: `${8 * scaleFactor}px`,
-            fontSize: `${baseFontSize}px`,
-            color: 'inherit',
-            lineHeight: 1.6,
-            fontFamily: 'inherit'
-          }}
-        >
-          {narrative}
-        </p>
+        (() => {
+          const paras = String(narrative).split(/\n\n+/).filter(p => p.trim().length);
+          const isSpec = /specialisation/i.test(title);
+          const renderTopIndustries = () => {
+            if (!isSpec || !topIndustriesByYear || !selectedYear) return null;
+            const rows = topIndustriesByYear[selectedYear];
+            if (!Array.isArray(rows) || rows.length === 0) return null;
+            const sorted = [...rows].sort((a,b) => Number(b.pct||0) - Number(a.pct||0)).slice(0,5);
+            const barHeight = Math.round(8 * scaleFactor);
+            return (
+              <div style={{ marginTop: `${10 * scaleFactor}px` }}>
+                <div style={{ fontWeight: 600, color: '#111827', fontSize: `${baseFontSize}px`, marginBottom: `${6 * scaleFactor}px` }}>
+                  Top 5 industries (% share) — {selectedYear}
+                </div>
+                <div style={{ display: 'grid', gap: `${6 * scaleFactor}px` }}>
+                  {sorted.map((r) => {
+                    const pct = Number(r.pct || 0);
+                    // Visualize as proportion of 100% for consistency across years
+                    const widthPct = Math.max(4, Math.min(100, Math.round(pct)));
+                    return (
+                      <div key={r.name} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: `${8 * scaleFactor}px`, alignItems: 'center' }}>
+                        <div>
+                          <div style={{ fontSize: `${baseFontSize * 0.9}px`, color: '#111827', marginBottom: `${3 * scaleFactor}px` }}>{r.name}</div>
+                          <div style={{ backgroundColor: '#E5E7EB', borderRadius: 999, height: barHeight, overflow: 'hidden' }}>
+                            <span style={{ display: 'block', height: '100%', width: `${widthPct}%`, backgroundColor: '#2563EB' }}></span>
+                          </div>
+                        </div>
+                        <div style={{ fontSize: `${baseFontSize * 0.9}px`, color: '#374151', minWidth: Math.round(40 * scaleFactor), textAlign: 'right' }}>
+                          {pct.toFixed(1).replace(/\.0$/, '')}%
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          };
+          return (
+            <div style={{
+              marginTop: `${10 * scaleFactor}px`,
+              borderTop: '1px solid #E5E7EB',
+              paddingTop: `${8 * scaleFactor}px`
+            }}>
+              {/* First paragraph */}
+              {paras[0] && (
+                <p style={{
+                  fontSize: `${baseFontSize}px`,
+                  color: 'inherit',
+                  lineHeight: 1.6,
+                  fontFamily: 'inherit',
+                  marginBottom: `${10 * scaleFactor}px`
+                }}>
+                  {paras[0]}
+                </p>
+              )}
+
+              {/* Middle: Top industries chart (Industry specialisation only) */}
+              {renderTopIndustries()}
+
+              {/* Remaining paragraphs (e.g., comparison) */}
+              {paras.slice(1).map((p, idx) => (
+                <p key={idx} style={{
+                  fontSize: `${baseFontSize}px`,
+                  color: 'inherit',
+                  lineHeight: 1.6,
+                  fontFamily: 'inherit',
+                  marginBottom: idx === paras.slice(1).length - 1 ? 0 : `${10 * scaleFactor}px`
+                }}>
+                  {p}
+                </p>
+              ))}
+            </div>
+          );
+        })()
       )}
       {comparisonChartData && comparisonChartData.length > 0 && (
         <div
@@ -255,7 +317,7 @@ const Legend = React.forwardRef(({ title, items, narrative = '', comparisonChart
           <div style={{ display: 'flex', justifyContent: 'center', gap: `${8 * scaleFactor}px`, fontSize: `${baseFontSize * 0.85}px`, color: '#4B5563', marginBottom: `${6 * scaleFactor}px` }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: `${3 * scaleFactor}px` }}>
               <span style={{ width: Math.round(10 * scaleFactor), height: Math.round(10 * scaleFactor), borderRadius: 2, backgroundColor: REGION_COLORS.fishermans }}></span>
-              FB
+              Fishermans Bend
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: `${3 * scaleFactor}px` }}>
               <span style={{ width: Math.round(10 * scaleFactor), height: Math.round(10 * scaleFactor), borderRadius: 2, backgroundColor: REGION_COLORS.docklands }}></span>
@@ -529,6 +591,8 @@ export default function Map() {
   const [fbBoundaryReady, setFbBoundaryReady] = useState(false);
   const [legendComparisonText, setLegendComparisonText] = useState('');
   const [legendComparisonChartData, setLegendComparisonChartData] = useState(null);
+  // Top industries (% share) loader for Industry specialisation
+  const [topIndustriesByYear, setTopIndustriesByYear] = useState(null);
 
   // --- Simple point-in-polygon utilities (ray casting) ---
   const pointInRing = (pt, ring) => {
@@ -741,8 +805,62 @@ export default function Map() {
       docklandsShare: docklandsDistribution[idx]?.share ?? 0,
       docklandsCount: docklandsDistribution[idx]?.count ?? 0
     }));
+    // --- New: Compute Fishermans Bend medians for 2011/2016/2021 and build a leading paragraph ---
+    const yearsAll = [2011, 2016, 2021];
+    const propByYear = indicatorName === 'Number of jobs' ? JOB_PROP_BY_YEAR : SPEC_PROP_FB_BY_YEAR;
+    const fcByYear = indicatorName === 'Number of jobs' ? jobsGeoByYear.current : specGeoByYear.current;
+    const median = (arr) => {
+      const a = (arr || []).filter(v => typeof v === 'number' && isFinite(v)).sort((x,y)=>x-y);
+      if (!a.length) return null;
+      const mid = Math.floor(a.length/2);
+      return a.length % 2 ? a[mid] : (a[mid-1] + a[mid]) / 2;
+    };
+    const fbMedians = {};
+    yearsAll.forEach((yr) => {
+      const fc = fcByYear[yr];
+      const prop = propByYear[yr];
+      if (!fc || !prop) { fbMedians[yr] = null; return; }
+      const vals = (fc.features || [])
+        .filter(f => isFeatureInsideFishermansBend(f))
+        .map(f => parseFloat(f.properties?.[prop]))
+        .filter(v => isFinite(v));
+      fbMedians[yr] = median(vals);
+    });
+    const selectedMedian = fbMedians[year];
+    const termForValue = (val) => {
+      if (!isFinite(val)) return 'n/a';
+      if (indicatorName === 'Industry specialisation') {
+        if (val >= 0.8) return 'highly specialised';
+        if (val >= 0.6) return 'specialised';
+        if (val >= 0.4) return 'moderately specialised';
+        return 'less specialised';
+      }
+      if (indicatorName === 'Number of jobs') {
+        // Map median to qualitative term using equal quintile-ish buckets against jobsMax when available
+        const maxV = (jobsMax && isFinite(jobsMax) && jobsMax > 0) ? jobsMax : Math.max(selectedMedian || 0, 1);
+        const ratio = (selectedMedian || 0) / maxV;
+        if (ratio >= 0.8) return 'very high';
+        if (ratio >= 0.6) return 'high';
+        if (ratio >= 0.4) return 'moderate';
+        if (ratio >= 0.2) return 'low';
+        return 'very low';
+      }
+      return 'n/a';
+    };
+    const fmt = (v) => indicatorName === 'Number of jobs' ? `${Math.round(v).toLocaleString()}` : `${Number(v).toFixed(2)}`;
+    const med2011 = fbMedians[2011];
+    const med2016 = fbMedians[2016];
+    const med2021 = fbMedians[2021];
+    const selectedYearLine = `In ${year}, Fishermans Bend area has median ${indicatorName.toLowerCase()} ${indicatorName === 'Number of jobs' ? 'value' : 'index'} of ${isFinite(selectedMedian) ? fmt(selectedMedian) : 'n/a'}, which means ${indicatorName.toLowerCase()} is ${termForValue(selectedMedian)}.`;
+    const changeLineParts = [];
+    if (isFinite(med2011)) changeLineParts.push(`${fmt(med2011)} in 2011`);
+    if (isFinite(med2016)) changeLineParts.push(`${fmt(med2016)} in 2016`);
+    if (isFinite(med2021)) changeLineParts.push(`${fmt(med2021)} in 2021`);
+    const changeLine = changeLineParts.length ? ` The median ${indicatorName.toLowerCase()} ${indicatorName === 'Number of jobs' ? 'value' : 'index'} has changed from ${changeLineParts.join(' to ')}.` : '';
+    const firstParagraph = `${selectedYearLine}${changeLine}`.trim();
+    const secondParagraph = `In ${year}, ${fbTopInfo.percentage} of Fishermans Bend areas is represented by the ${fbTopInfo.classNames} class, compared with Docklands that ${dockTopInfo.percentage} of areas is in the ${dockTopInfo.classNames} class.`.trim();
     return {
-      text: `In ${year}, ${fbTopInfo.percentage} of Fishermans Bend areas is represented by the ${fbTopInfo.classNames} class, compared with Docklands that ${dockTopInfo.percentage} of areas is in the ${dockTopInfo.classNames} class.`.trim(),
+      text: `${firstParagraph}\n\n${secondParagraph}`,
       chart
     };
   };
@@ -3231,10 +3349,12 @@ Do not invent or infer any data values, statistics, or trends.`;
                 try {
                   const indicatorNameToUse = selectedIndicator || 'Number of jobs';
                   const stats = await computePrecinctOverlay(name, yr, indicatorNameToUse);
-                  const text = generatePrecinctNarrativeDeterministic(stats, indicatorNameToUse);
-                  descriptionCache.current[cacheKey] = text;
+                  const baseText = generatePrecinctNarrativeDeterministic(stats, indicatorNameToUse);
+                  const changePara = await buildPrecinctMedianChangeParagraph(name, indicatorNameToUse);
+                  const combined = changePara ? `${baseText}\n\n${changePara}` : baseText;
+                  descriptionCache.current[cacheKey] = combined;
                   setPrecinctNarrative('');
-                  setDynamicDescription(text);
+                  setDynamicDescription(combined);
                 } catch (e) {
                   console.error('Failed to generate precinct narrative:', e);
                   setDynamicDescription('');
@@ -3278,9 +3398,11 @@ Do not invent or infer any data values, statistics, or trends.`;
       try {
         const indicatorNameToUse = selectedIndicator || 'Number of jobs';
         const stats = await computePrecinctOverlay(name, yr, indicatorNameToUse);
-        const text = generatePrecinctNarrativeDeterministic(stats, indicatorNameToUse);
+        const baseText = generatePrecinctNarrativeDeterministic(stats, indicatorNameToUse);
+        const changePara = await buildPrecinctMedianChangeParagraph(name, indicatorNameToUse);
+        const combined = changePara ? `${baseText}\n\n${changePara}` : baseText;
         if (!canceled) {
-          setDynamicDescription(text);
+          setDynamicDescription(combined);
         }
       } catch (e) { /* ignore */ }
     })();
@@ -3309,6 +3431,37 @@ Do not invent or infer any data values, statistics, or trends.`;
     setLegendComparisonText(stats?.text || '');
     setLegendComparisonChartData(stats?.chart || null);
   }, [selectedIndicator, selectedYear, jobsDataLoaded, specDataReady, docklandsReady, fbBoundaryReady, jobsBreaks]);
+
+  // Load top industries JSON when Industry specialisation is active
+  useEffect(() => {
+    let canceled = false;
+    const loadTopIndustries = async () => {
+      if (selectedIndicator !== 'Industry specialisation') { setTopIndustriesByYear(null); return; }
+      try {
+        const res = await fetch('/data/top_industries_fb.json');
+        if (!res.ok) throw new Error('Failed to load top industries JSON');
+        const arr = await res.json();
+        // Transform to {year: [{name,pct}, ...]}
+        const byYear = { 2011: [], 2016: [], 2021: [] };
+        (arr || []).forEach((row) => {
+          const name = row.Industry || row.industry || '';
+          ['2011','2016','2021'].forEach((yr) => {
+            const raw = row[yr];
+            if (typeof raw === 'string' && raw.trim()) {
+              const pct = parseFloat(raw.replace('%',''));
+              if (isFinite(pct)) byYear[parseInt(yr,10)].push({ name, pct });
+            }
+          });
+        });
+        if (!canceled) setTopIndustriesByYear(byYear);
+      } catch (e) {
+        console.error('Top industries data load error:', e);
+        if (!canceled) setTopIndustriesByYear(null);
+      }
+    };
+    loadTopIndustries();
+    return () => { canceled = true; };
+  }, [selectedIndicator]);
 
   // Update map visual style when a precinct is highlighted from text
   useEffect(() => {
@@ -3653,6 +3806,57 @@ Do not invent or infer any data values, statistics, or trends.`;
       return await computePrecinctWalkabilityOverlay(precinctName, year);
     }
     return await computePrecinctJobsOverlay(precinctName, year);
+  };
+
+  // Build a median-change paragraph using ONLY intersected areas across years for a precinct
+  const buildPrecinctMedianChangeParagraph = async (precinctName, indicatorNameArg) => {
+    try {
+      const ind = indicatorNameArg || selectedIndicator || 'Number of jobs';
+      // Use the same available years logic as indicator narrative
+      const getDefaultYears = (indicatorName) => {
+        if (indicatorName === 'Accessibility of Social Infrastructure') return [2018, 2021];
+        if (indicatorName === 'Housing stress') return [2018, 2021];
+        if (indicatorName === 'Walkability') return [2018, 2021];
+        if (indicatorName === 'Diversity of residents’ age' || indicatorName === 'Diversity of residents’ income') return [2016, 2021];
+        return [2011, 2016, 2021];
+      };
+      const years = getDefaultYears(ind);
+      const isJobs = /job/i.test(ind);
+      const isSpec = /(industry|special)/i.test(ind);
+      const median = (arr) => {
+        const a = (arr || []).filter(v => typeof v === 'number' && isFinite(v)).sort((x,y)=>x-y);
+        if (!a.length) return null;
+        const mid = Math.floor(a.length/2);
+        return a.length % 2 ? a[mid] : (a[mid-1] + a[mid]) / 2;
+      };
+      const vals = {};
+      for (const yr of years) {
+        try {
+          const overlay = await computePrecinctOverlay(precinctName, yr, ind);
+          const arr = (overlay && Array.isArray(overlay.intersections))
+            ? overlay.intersections.map(i => isFinite(i?.value) ? Number(i.value) : NaN).filter(v => isFinite(v))
+            : [];
+          vals[yr] = median(arr);
+        } catch (_) {
+          vals[yr] = null;
+        }
+      }
+      const fmtVal = (v) => {
+        if (!isFinite(v)) return 'n/a';
+        if (isJobs) return `${Math.round(v).toLocaleString()}`;
+        if (isSpec) return `${Number(v).toFixed(2)}`;
+        return `${Number(v).toFixed(2)}`;
+      };
+      const parts = [];
+      years.forEach((yr) => { if (isFinite(vals[yr])) parts.push(`${fmtVal(vals[yr])} in ${yr}`); });
+      if (!parts.length) return '';
+      const indLower = isJobs ? 'number of jobs' : (isSpec ? 'industry specialisation index' : ind.toLowerCase());
+      const noun = isJobs ? 'value' : (isSpec ? 'index' : 'value');
+      // Include precinct name and remove the note about intersected areas
+      return `The median ${indLower} for ${precinctName} ${noun} has changed from ${parts.join(' to ')}.`;
+    } catch (_) {
+      return '';
+    }
   };
 
   // Compute SA1-based overlay for Social Infrastructure indicator
@@ -4424,7 +4628,63 @@ Do not invent or infer any data values, statistics, or trends.`;
     // Therefore conclusion
     const s5 = ` Therefore, the **${precinct}** precinct is dominantly characterized by a **${dominant.label}** level of **${indicatorName}**.`;
 
-    return `${s1} ${s2} ${s3}${s4}${s5}`;
+    // Build change paragraph comparing medians across years using ONLY intersected areas
+    const buildChangeParagraph = async () => {
+      const yearsAll = [2011, 2016, 2021];
+      const indicatorName = indicatorNameArg || 'Number of jobs';
+      const median = (arr) => {
+        const a = (arr || []).filter(v => typeof v === 'number' && isFinite(v)).sort((x,y)=>x-y);
+        if (!a.length) return null;
+        const mid = Math.floor(a.length/2);
+        return a.length % 2 ? a[mid] : (a[mid-1] + a[mid]) / 2;
+      };
+      const valsByYear = {};
+      for (const yr of yearsAll) {
+        try {
+          let overlay;
+          if (indicatorName === 'Number of jobs') {
+            overlay = await computePrecinctJobsOverlay(precinct, yr);
+          } else if (indicatorName === 'Industry specialisation') {
+            overlay = await computePrecinctSpecOverlay(precinct, yr);
+          } else {
+            overlay = null;
+          }
+          if (overlay && Array.isArray(overlay.intersections) && overlay.intersections.length) {
+            const arr = overlay.intersections
+              .map(i => i && isFinite(i.value) ? Number(i.value) : NaN)
+              .filter(v => isFinite(v));
+            valsByYear[yr] = median(arr);
+          } else {
+            valsByYear[yr] = null;
+          }
+        } catch (_) {
+          valsByYear[yr] = null;
+        }
+      }
+      const fmtVal = (v) => {
+        if (!isFinite(v)) return 'n/a';
+        return indicatorName === 'Number of jobs' ? `${Math.round(v).toLocaleString()}` : `${Number(v).toFixed(2)}`;
+      };
+      const v11 = valsByYear[2011];
+      const v16 = valsByYear[2016];
+      const v21 = valsByYear[2021];
+      const parts = [];
+      if (isFinite(v11)) parts.push(`${fmtVal(v11)} in 2011`);
+      if (isFinite(v16)) parts.push(`${fmtVal(v16)} in 2016`);
+      if (isFinite(v21)) parts.push(`${fmtVal(v21)} in 2021`);
+      if (!parts.length) return '';
+      const indLower = indicatorName.toLowerCase();
+      return `The median ${indLower} ${indicatorName === 'Number of jobs' ? 'value' : 'index'} (computed from intersected areas only) has changed from ${parts.join(' to ')}.`;
+    };
+
+    const firstParagraph = `${s1} ${s2} ${s3}${s4}${s5}`;
+    // Since buildChangeParagraph is async, return combined text via placeholder; caller handles async rendering.
+    // For synchronous usage, fall back to first paragraph only and update when async result resolves elsewhere.
+    // Here, we optimistically attempt to resolve synchronously if possible.
+    // Note: generatePrecinctNarrativeDeterministic is used synchronously; to avoid UI disruption, we will not await here.
+    // The UI already shows available years separately.
+    // Return first paragraph; the async change paragraph is computed in overlay-driven narrative elsewhere.
+    return firstParagraph;
   };
 
   const handleExportToPDF = async () => {
@@ -4808,6 +5068,8 @@ Do not invent or infer any data values, statistics, or trends.`;
                         ? legendComparisonChartData
                         : null
                     }
+                    topIndustriesByYear={selectedIndicator === 'Industry specialisation' ? topIndustriesByYear : null}
+                    selectedYear={selectedYear}
                   />
                 </>
               );
