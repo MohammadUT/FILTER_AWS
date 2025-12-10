@@ -14,6 +14,9 @@ from shapely.geometry import shape, mapping
 from shapely.ops import unary_union
 from shapely.prepared import prep
 from pyproj import Transformer, CRS
+import os
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # --- Initialize Flask App and CORS ---
 app = Flask(__name__)
@@ -29,7 +32,9 @@ def load_metadata_from_json(filepath):
         return None
 
 
-JSON_FILEPATH = './indicatorMetadata.json'
+# JSON_FILEPATH = './indicatorMetadata.json'
+JSON_FILEPATH = os.path.join(BASE_DIR, 'indicatorMetadata.json')
+
 METADATA = load_metadata_from_json(JSON_FILEPATH)
 
 def create_documents_from_metadata(metadata):
@@ -79,7 +84,7 @@ def find_ranked_indicators(query, model, indicator_names, document_embeddings):
 
 # --- Pre-load model and data ONCE on server startup for efficiency ---
 print("Backend server is starting...")
-JSON_FILEPATH = '/Users/E113938/Library/CloudStorage/OneDrive-RMITUniversity/My Mac Folders/2025/FILTER Project/FILTER/Map Dashboard/Map Demonstrator/src/components/indicatorMetadata.json' # Adjust this path if needed
+# JSON_FILEPATH = '/Users/E113938/Library/CloudStorage/OneDrive-RMITUniversity/My Mac Folders/2025/FILTER Project/FILTER/Map Dashboard/Map Demonstrator/src/components/indicatorMetadata.json' # Adjust this path if needed
 METADATA = load_metadata_from_json(JSON_FILEPATH)
 
 # Globals for search backends

@@ -10,6 +10,7 @@ import * as turf from '@turf/turf';
 
 // --- LLM API Setup ---
 const genAI = new GoogleGenerativeAI(process.env.REACT_APP_GEMINI_API_KEY);
+const API_URL = process.env.REACT_APP_API_URL || 'http://127.0.0.1:5000';
 
 // --- START: INTERACTIVE DESCRIPTION COMPONENT ---
 // This component finds and styles specified keywords in a block of text.
@@ -3492,7 +3493,7 @@ Do not invent or infer any data values, statistics, or trends.`;
     setSearchError('');
 
     try {
-      const response = await fetch('http://127.0.0.1:5000/api/search', {
+      const response = await fetch(`${API_URL}/api/search`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -3725,7 +3726,7 @@ Do not invent or infer any data values, statistics, or trends.`;
   const computePrecinctOverlay = async (precinctName, year, indicatorName) => {
     const ind = (indicatorName || selectedIndicator || 'Number of jobs');
     try {
-      const resp = await fetch('http://127.0.0.1:5000/api/precinct_overlay', {
+      const resp = await fetch(`${API_URL}/api/precinct_overlay`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ precinctName, year, indicator: ind })
@@ -4101,7 +4102,7 @@ Do not invent or infer any data values, statistics, or trends.`;
   const computePrecinctJobsOverlay = async (precinctName, year) => {
     // First try server-side overlay for robustness (Shapely + pyproj)
     try {
-      const resp = await fetch('http://127.0.0.1:5000/api/precinct_overlay', {
+      const resp = await fetch(`${API_URL}/api/precinct_overlay`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ precinctName, year, indicator: 'Number of jobs' })
@@ -4353,7 +4354,7 @@ Do not invent or infer any data values, statistics, or trends.`;
   const computePrecinctSpecOverlay = async (precinctName, year) => {
     // First try server-side overlay for robustness (Shapely + pyproj)
     try {
-      const resp = await fetch('http://127.0.0.1:5000/api/precinct_overlay', {
+      const resp = await fetch(`${API_URL}/api/precinct_overlay`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ precinctName, year, indicator: 'Industry specialisation' })
