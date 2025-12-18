@@ -371,11 +371,12 @@ export default function Map() {
   // Definitions for interactive text highlighting
   const PRECINCT_NAMES = ['Montague', 'Sandridge', 'Lorimer', 'Wirraway', 'Employment Precinct'];
   const PRECINCT_COLORS = {
-    'Montague': '#3498db',
-    'Sandridge': '#e74c3c',
-    'Lorimer': '#2ecc71',
-    'Wirraway': '#f39c12',
-    'Employment Precinct': '#9b59b6'
+    // Match attached photo: Montague (cyan), Sandridge (orange), Lorimer (blue), Wirraway (green), Employment Precinct (red)
+    'Montague': '#14b8a6',
+    'Sandridge': '#f59e0b',
+    'Lorimer': '#2563EB',
+    'Wirraway': '#2ecc71',
+    'Employment Precinct': '#e53935'
   };
 
   // Landing description for Fishermans Bend Framework (shown on first load)
@@ -3796,8 +3797,8 @@ Do not invent or infer any data values, statistics, or trends.`;
           };
         }
       }
-    } catch (_) {
-      // ignore and fallback
+    } catch (err) {
+      console.warn('Precinct overlay server call failed; falling back to client overlay:', err);
     }
     if (/industry|special/i.test(ind)) {
       return await computePrecinctSpecOverlay(precinctName, year);
