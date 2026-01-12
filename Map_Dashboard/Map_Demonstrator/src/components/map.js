@@ -234,6 +234,7 @@ const Legend = React.forwardRef(({ title, items, narrative = '', comparisonChart
         (() => {
           const paras = String(narrative).split(/\n\n+/).filter(p => p.trim().length);
           const isSpec = /specialisation/i.test(title);
+          const showFbNarrativeTitle = /Fishermans\s*Bend/i.test(String(narrative));
           const renderTopIndustries = () => {
             if (!isSpec || !topIndustriesByYear || !selectedYear) return null;
             const rows = topIndustriesByYear[selectedYear];
@@ -274,6 +275,9 @@ const Legend = React.forwardRef(({ title, items, narrative = '', comparisonChart
               borderTop: '1px solid #E5E7EB',
               paddingTop: `${8 * scaleFactor}px`
             }}>
+              {showFbNarrativeTitle && (
+                <h4 style={{ margin: '0 0 0.5rem 0', fontWeight: 'bold', fontSize: `${baseFontSize}px`, color: 'inherit', fontFamily: 'inherit' }}>Fishermans Bend Overview</h4>
+              )}
               {/* First paragraph */}
               {paras[0] && (
                 <p style={{
@@ -363,7 +367,9 @@ export default function Map() {
   const map = useRef(null);
   const descriptionCache = useRef({});
   const legendRef = useRef(null); // Ref for the legend component
+  const legendExportRef = useRef(null); // Offscreen legend ref for PDF export
   const chartRef = useRef(null); // Ref for the jobs chart (for PDF export)
+  const specChartRef = useRef(null); // Ref for the industry specialisation chart (for PDF export)
   const hoverStateBySource = useRef({}); // track hovered feature ids per source for outlines
   const selectedStateBySource = useRef({}); // track selected feature ids per source for outlines
   const jobsPopupRef = useRef(null); // popup for hover charts
@@ -379,7 +385,7 @@ export default function Map() {
     'Employment Precinct': '#e53935'
   };
 
-  // Landing description for Fishermans Bend Framework (shown on first load)
+  // Landing description for Fishermans Bend Overview (shown on first load)
   const LANDING_TEXT = `Fishermans Bend is Australia’s largest urban renewal precinct covering approximately 480 hectares in the heart of Melbourne. Fishermans Bend consists of five precincts across two municipalities – the City of Melbourne and the City of Port Phillip – and connects Melbourne's CBD to the bay. There are five distinct precincts in this area including:
 
 1. **Employment Precinct**
@@ -399,6 +405,8 @@ export default function Map() {
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
   const [isExporting, setIsExporting] = useState(false); // State for PDF export
+  const [exportProgress, setExportProgress] = useState(0); // 0..100
+  const [exportProgressText, setExportProgressText] = useState('');
   const [mapLoaded, setMapLoaded] = useState(false); // Map style is loaded
   const [layersReady, setLayersReady] = useState(false); // All thematic layers added
   const [specDataError, setSpecDataError] = useState(false); // Industry specialisation file load error
@@ -478,7 +486,7 @@ export default function Map() {
   , 'Walkability': { path: null, property: null }
   };
 
-  const DEFAULT_JOBS_YEAR = 2011;
+  const DEFAULT_JOBS_YEAR = 2021;
 
   // Current indicators derived from config; previous indicators can be manually curated
   const currentIndicators = Object.keys(indicatorConfig);
@@ -538,12 +546,12 @@ export default function Map() {
     return () => { canceled = true; };
   }, []);
 
-  // Default selection and visualisation: Number of jobs (2011), but show framework description on landing
+  // Default selection and visualisation: Number of jobs (2021), but show overview description on landing
   useEffect(() => {
     // Set preselected year to avoid being overridden by the 'latest year' effect
-    setSelectedYear(2011);
+    setSelectedYear(DEFAULT_JOBS_YEAR);
     setSelectedIndicator('Number of jobs');
-    // Right panel shows the Fishermans Bend Framework description on first load
+    // Right panel shows the Fishermans Bend Overview description on first load
     setPanelFocus({ type: 'framework', name: 'Fishermans Bend Framework' });
     setDynamicDescription(LANDING_TEXT);
     // No dependency: fire once on mount
@@ -853,14 +861,15 @@ export default function Map() {
     const med2011 = fbMedians[2011];
     const med2016 = fbMedians[2016];
     const med2021 = fbMedians[2021];
-    const selectedYearLine = `In ${year}, Fishermans Bend area has median ${indicatorName.toLowerCase()} ${indicatorName === 'Number of jobs' ? 'value' : 'index'} of ${isFinite(selectedMedian) ? fmt(selectedMedian) : 'n/a'}, which means ${indicatorName.toLowerCase()} is ${termForValue(selectedMedian)}.`;
+    const selectedYearLine = `In ${year}, Fishermans Bend precincts have median ${indicatorName.toLowerCase()} ${indicatorName === 'Number of jobs' ? 'value' : 'index'} of ${isFinite(selectedMedian) ? fmt(selectedMedian) : 'n/a'}, which means ${indicatorName.toLowerCase()} is ${termForValue(selectedMedian)}.`;
     const changeLineParts = [];
     if (isFinite(med2011)) changeLineParts.push(`${fmt(med2011)} in 2011`);
     if (isFinite(med2016)) changeLineParts.push(`${fmt(med2016)} in 2016`);
     if (isFinite(med2021)) changeLineParts.push(`${fmt(med2021)} in 2021`);
     const changeLine = changeLineParts.length ? ` The median ${indicatorName.toLowerCase()} ${indicatorName === 'Number of jobs' ? 'value' : 'index'} has changed from ${changeLineParts.join(' to ')}.` : '';
     const firstParagraph = `${selectedYearLine}${changeLine}`.trim();
-    const secondParagraph = `In ${year}, ${fbTopInfo.percentage} of Fishermans Bend areas is represented by the ${fbTopInfo.classNames} class, compared with Docklands that ${dockTopInfo.percentage} of areas is in the ${dockTopInfo.classNames} class.`.trim();
+    const indicatorLabel = indicatorName.toLowerCase();
+    const secondParagraph = `In ${year}, ${fbTopInfo.percentage} of Fishermans Bend precincts are classified as ${fbTopInfo.classNames} ${indicatorLabel}, compared with ${dockTopInfo.percentage} of Docklands precincts are classified as ${dockTopInfo.classNames} ${indicatorLabel}.`.trim();
     return {
       text: `${firstParagraph}\n\n${secondParagraph}`,
       chart
@@ -1752,7 +1761,9 @@ export default function Map() {
       style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
       scrollZoom: false, boxZoom: false, dragRotate: false, dragPan: false,
       keyboard: false, doubleClickZoom: false, touchZoomRotate: false,
-      preserveDrawingBuffer: true // Required for exporting map canvas
+      // Required for exporting map canvas (MapLibre v3+ uses canvasContextAttributes)
+      preserveDrawingBuffer: true,
+      canvasContextAttributes: { preserveDrawingBuffer: true }
     });
 
     map.current.on('error', (e) => {
@@ -2376,23 +2387,23 @@ export default function Map() {
         });
       });
 
-      // Safety: default to show 2011 jobs layer on first load (others remain hidden)
-      const initialJobsLayer = 'number-of-jobs-2011-layer';
-      const outline2011 = `${initialJobsLayer}-hover-outline`;
-      const baseOutline2011 = `${initialJobsLayer}-base-outline`;
-      const dimMask2011 = `${initialJobsLayer}-dim-mask`;
+      // Safety: default to show 2021 jobs layer on first load (others remain hidden)
+      const initialJobsLayer = 'number-of-jobs-2021-layer';
+      const outline2021 = `${initialJobsLayer}-hover-outline`;
+      const baseOutline2021 = `${initialJobsLayer}-base-outline`;
+      const dimMask2021 = `${initialJobsLayer}-dim-mask`;
       try {
         if (map.current.getLayer(initialJobsLayer)) {
           map.current.setLayoutProperty(initialJobsLayer, 'visibility', 'visible');
         }
-        if (map.current.getLayer(outline2011)) {
-          map.current.setLayoutProperty(outline2011, 'visibility', 'visible');
+        if (map.current.getLayer(outline2021)) {
+          map.current.setLayoutProperty(outline2021, 'visibility', 'visible');
         }
-        if (map.current.getLayer(baseOutline2011)) {
-          map.current.setLayoutProperty(baseOutline2011, 'visibility', 'visible');
+        if (map.current.getLayer(baseOutline2021)) {
+          map.current.setLayoutProperty(baseOutline2021, 'visibility', 'visible');
         }
-        if (map.current.getLayer(dimMask2011)) {
-          map.current.setLayoutProperty(dimMask2011, 'visibility', 'none');
+        if (map.current.getLayer(dimMask2021)) {
+          map.current.setLayoutProperty(dimMask2021, 'visibility', 'none');
         }
       } catch (_) { /* ignore */ }
 
@@ -2491,15 +2502,42 @@ export default function Map() {
     return () => { if (map.current) { map.current.remove(); map.current = null; } };
   }, []);
 
-  // Adjust map bounds on load
+  // Compute Fishermans Bend bounds from loaded precinct geometries; fallback to static
+  const getFBBounds = () => {
+    try {
+      if (fbBoundaryGeomsRef.current && fbBoundaryGeomsRef.current.length) {
+        const fc = {
+          type: 'FeatureCollection',
+          features: fbBoundaryGeomsRef.current.map((geom) => ({ type: 'Feature', properties: {}, geometry: geom }))
+        };
+        const b = turf.bbox(fc); // [minX, minY, maxX, maxY]
+        return [[b[0], b[1]], [b[2], b[3]]];
+      }
+    } catch (_) { /* ignore and fall back */ }
+    // Fallback static bounds covering all FB precincts
+    return [[144.900, -37.855], [144.950, -37.810]];
+  };
+
+  // Adjust map bounds on load and when called explicitly
+  const getFitPadding = () => {
+    // IMPORTANT: The left/right panels are outside the map container (flex layout),
+    // so we should NOT reserve their widths as padding. Doing so forces fitBounds
+    // to zoom out more on small screens (e.g., laptop), reducing basemap detail.
+    const rect = mapContainer.current?.getBoundingClientRect?.();
+    const w = rect?.width || window.innerWidth || 1200;
+    const h = rect?.height || window.innerHeight || 800;
+
+    // Use a small proportional margin so the FB boundary isn't clipped.
+    const pad = Math.max(8, Math.round(Math.min(w, h) * 0.05));
+    return { top: pad, bottom: pad, left: pad, right: pad };
+  };
+
   const adjustMapBounds = () => {
     if (!map.current) return;
-    // Tighter bounds to zoom in while respecting side panels
-    const bounds = [ [144.915, -37.85], [144.943, -37.816] ];
-    const legendHeight = window.innerHeight < 900 ? 140 : 170;
+    const bounds = getFBBounds();
     map.current.fitBounds(bounds, {
-      padding: { top: 20, bottom: legendHeight, left: leftPanelWidth, right: rightPanelWidth },
-      duration: 2000, essential: true
+      padding: getFitPadding(),
+      duration: 200, essential: true
     });
   };
 
@@ -2511,15 +2549,22 @@ export default function Map() {
     }
     const debouncedAdjustBounds = () => {
       if (!map.current) return;
-      // Keep resize behavior consistent with tighter zoomed-in bounds
-      const bounds = [ [144.900, -37.845], [144.940, -37.820] ];
-      const legendHeight = window.innerHeight < 900 ? 140 : 170;
-      map.current.fitBounds(bounds, { padding: { top: 20, bottom: legendHeight, left: leftPanelWidth, right: rightPanelWidth }, duration: 0 });
+      // Ensure MapLibre recalculates transform for the new container size
+      // (critical when moving between monitors / changing device pixel ratio).
+      try { map.current.resize(); } catch (_) { /* ignore */ }
+      const bounds = getFBBounds();
+      map.current.fitBounds(bounds, { padding: getFitPadding(), duration: 0 });
     };
     const debouncedResizeListener = debounce(debouncedAdjustBounds, 150);
     window.addEventListener('resize', debouncedResizeListener);
     return () => window.removeEventListener('resize', debouncedResizeListener);
   }, []);
+
+  // Re-fit once the Fishermans Bend boundary data is ready
+  useEffect(() => {
+    if (!map.current) return;
+    if (fbBoundaryReady) adjustMapBounds();
+  }, [fbBoundaryReady]);
 
   // Toggle visibility of indicator layers
   useEffect(() => {
@@ -2605,7 +2650,7 @@ export default function Map() {
   useEffect(() => {
     if (panelFocus && panelFocus.type === 'indicator' && panelFocus.name === 'Industry specialisation') {
       const years = availableYears.length ? availableYears : [2011, 2016, 2021];
-      const preferred = years.includes(2011) ? 2011 : Math.max(...years);
+      const preferred = years.includes(2021) ? 2021 : Math.max(...years);
       if (!selectedYear || !years.includes(selectedYear)) {
         setSelectedYear(preferred);
       }
@@ -2616,7 +2661,7 @@ export default function Map() {
   useEffect(() => {
     if (panelFocus && panelFocus.type === 'indicator' && panelFocus.name === 'Land use mix') {
       const years = availableYears.length ? availableYears : [2011, 2016, 2021];
-      const preferred = years.includes(2011) ? 2011 : Math.max(...years);
+      const preferred = years.includes(2021) ? 2021 : Math.max(...years);
       if (!selectedYear || !years.includes(selectedYear)) {
         setSelectedYear(preferred);
       }
@@ -2627,7 +2672,7 @@ export default function Map() {
   useEffect(() => {
     if (panelFocus && panelFocus.type === 'indicator' && (panelFocus.name === 'Number of residents' || panelFocus.name === 'Number of dwellings' || panelFocus.name === 'Number of residents_SA1')) {
       const years = availableYears.length ? availableYears : [2011, 2016, 2021];
-      const preferred = years.includes(2011) ? 2011 : Math.max(...years);
+      const preferred = years.includes(2021) ? 2021 : Math.max(...years);
       if (!selectedYear || !years.includes(selectedYear)) {
         setSelectedYear(preferred);
       }
@@ -2638,7 +2683,7 @@ export default function Map() {
   useEffect(() => {
     if (panelFocus && panelFocus.type === 'indicator' && panelFocus.name === 'Diversity of residents’ age') {
       const years = availableYears.length ? availableYears : [2016, 2021];
-      const preferred = years.includes(2016) ? 2016 : Math.min(...years);
+      const preferred = years.includes(2021) ? 2021 : Math.max(...years);
       if (!selectedYear || !years.includes(selectedYear)) {
         setSelectedYear(preferred);
       }
@@ -2649,7 +2694,7 @@ export default function Map() {
   useEffect(() => {
     if (panelFocus && panelFocus.type === 'indicator' && panelFocus.name === 'Diversity of residents’ income') {
       const years = availableYears.length ? availableYears : [2016, 2021];
-      const preferred = years.includes(2016) ? 2016 : Math.min(...years);
+      const preferred = years.includes(2021) ? 2021 : Math.max(...years);
       if (!selectedYear || !years.includes(selectedYear)) {
         setSelectedYear(preferred);
       }
@@ -2660,7 +2705,7 @@ export default function Map() {
   useEffect(() => {
     if (panelFocus && panelFocus.type === 'indicator' && panelFocus.name === 'Accessibility of Social Infrastructure') {
       const years = availableYears.length ? availableYears : [2018, 2021];
-      const preferred = years.includes(2018) ? 2018 : Math.min(...years);
+      const preferred = years.includes(2021) ? 2021 : Math.max(...years);
       if (!selectedYear || !years.includes(selectedYear)) {
         setSelectedYear(preferred);
       }
@@ -2671,7 +2716,7 @@ export default function Map() {
   useEffect(() => {
     if (panelFocus && panelFocus.type === 'indicator' && panelFocus.name === 'Housing stress') {
       const years = availableYears.length ? availableYears : [2018, 2021];
-      const preferred = years.includes(2018) ? 2018 : Math.min(...years);
+      const preferred = years.includes(2021) ? 2021 : Math.max(...years);
       if (!selectedYear || !years.includes(selectedYear)) {
         setSelectedYear(preferred);
       }
@@ -2682,7 +2727,7 @@ export default function Map() {
   useEffect(() => {
     if (panelFocus && panelFocus.type === 'indicator' && panelFocus.name === 'Walkability') {
       const years = availableYears.length ? availableYears : [2018, 2021];
-      const preferred = years.includes(2018) ? 2018 : Math.min(...years);
+      const preferred = years.includes(2021) ? 2021 : Math.max(...years);
       if (!selectedYear || !years.includes(selectedYear)) {
         setSelectedYear(preferred);
       }
@@ -2693,7 +2738,7 @@ export default function Map() {
   useEffect(() => {
     if (selectedIndicator === 'Accessibility of Social Infrastructure') {
       if (selectedYear !== 2018 && selectedYear !== 2021) {
-        setSelectedYear(2018);
+        setSelectedYear(2021);
       }
     }
   }, [selectedIndicator, selectedYear]);
@@ -2702,7 +2747,7 @@ export default function Map() {
   useEffect(() => {
     if (selectedIndicator === 'Housing stress') {
       if (selectedYear !== 2018 && selectedYear !== 2021) {
-        setSelectedYear(2018);
+        setSelectedYear(2021);
       }
     }
   }, [selectedIndicator, selectedYear]);
@@ -2711,7 +2756,7 @@ export default function Map() {
   useEffect(() => {
     if (selectedIndicator === 'Walkability') {
       if (selectedYear !== 2018 && selectedYear !== 2021) {
-        setSelectedYear(2018);
+        setSelectedYear(2021);
       }
     }
   }, [selectedIndicator, selectedYear]);
@@ -2744,7 +2789,7 @@ export default function Map() {
 
     if (selectedIndicator === 'Number of residents_SA1') {
       const years = availableYears.length ? availableYears : [2011, 2016, 2021];
-      const y = years.includes(selectedYear) ? selectedYear : 2011;
+      const y = years.includes(selectedYear) ? selectedYear : (years.includes(2021) ? 2021 : Math.max(...years));
       setVisibility(layerIds[y], 'visible');
     }
   }, [selectedIndicator, selectedYear, availableYears, mapLoaded, layersReady]);
@@ -2818,7 +2863,7 @@ export default function Map() {
 
     if (selectedIndicator === 'Number of residents') {
       const years = availableYears.length ? availableYears : [2011, 2016, 2021];
-      const y = years.includes(selectedYear) ? selectedYear : 2011;
+      const y = years.includes(selectedYear) ? selectedYear : (years.includes(2021) ? 2021 : Math.max(...years));
       setVisibility(layerIds[y], 'visible');
     }
   }, [selectedIndicator, selectedYear, availableYears, mapLoaded, layersReady]);
@@ -2850,7 +2895,7 @@ export default function Map() {
 
     if (selectedIndicator === 'Number of dwellings') {
       const years = availableYears.length ? availableYears : [2011, 2016, 2021];
-      const y = years.includes(selectedYear) ? selectedYear : 2011;
+      const y = years.includes(selectedYear) ? selectedYear : (years.includes(2021) ? 2021 : Math.max(...years));
       setVisibility(layerIds[y], 'visible');
     }
   }, [selectedIndicator, selectedYear, availableYears, mapLoaded, layersReady]);
@@ -2923,7 +2968,7 @@ export default function Map() {
 
     if (selectedIndicator === 'Industry specialisation') {
       const years = availableYears.length ? availableYears : [2011, 2016, 2021];
-      const defaultYear = years.includes(2011) ? 2011 : Math.max(...years);
+      const defaultYear = years.includes(2021) ? 2021 : Math.max(...years);
       const yearToShow = selectedYear || defaultYear;
       const layerToShow = layerIds[yearToShow];
       if (layerToShow) setVisibility(layerToShow, 'visible');
@@ -2959,7 +3004,7 @@ export default function Map() {
 
     if (selectedIndicator === 'Land use mix') {
       const years = availableYears.length ? availableYears : [2011, 2016, 2021];
-      const y = years.includes(selectedYear) ? selectedYear : 2011;
+      const y = years.includes(selectedYear) ? selectedYear : (years.includes(2021) ? 2021 : Math.max(...years));
       setVisibility(layerIds[y], 'visible');
     }
   }, [selectedIndicator, selectedYear, availableYears, mapLoaded, layersReady]);
@@ -2990,7 +3035,7 @@ export default function Map() {
 
     if (selectedIndicator === 'Diversity of residents’ age') {
       const years = availableYears.length ? availableYears : [2016, 2021];
-      const y = years.includes(selectedYear) ? selectedYear : 2016;
+      const y = years.includes(selectedYear) ? selectedYear : (years.includes(2021) ? 2021 : Math.max(...years));
       setVisibility(layerIds[y], 'visible');
     }
   }, [selectedIndicator, selectedYear, availableYears, mapLoaded, layersReady]);
@@ -3021,7 +3066,7 @@ export default function Map() {
 
     if (selectedIndicator === 'Diversity of residents’ income') {
       const years = availableYears.length ? availableYears : [2016, 2021];
-      const y = years.includes(selectedYear) ? selectedYear : 2016;
+      const y = years.includes(selectedYear) ? selectedYear : (years.includes(2021) ? 2021 : Math.max(...years));
       setVisibility(layerIds[y], 'visible');
     }
   }, [selectedIndicator, selectedYear, availableYears, mapLoaded, layersReady]);
@@ -3052,7 +3097,7 @@ export default function Map() {
 
     if (selectedIndicator === 'Accessibility of Social Infrastructure') {
       const years = availableYears.length ? availableYears : [2018, 2021];
-      const y = years.includes(selectedYear) ? selectedYear : 2018;
+      const y = years.includes(selectedYear) ? selectedYear : (years.includes(2021) ? 2021 : Math.max(...years));
       setVisibility(layerIds[y], 'visible');
     }
   }, [selectedIndicator, selectedYear, availableYears, mapLoaded, layersReady]);
@@ -3083,7 +3128,7 @@ export default function Map() {
 
     if (selectedIndicator === 'Housing stress') {
       const years = availableYears.length ? availableYears : [2018, 2021];
-      const y = years.includes(selectedYear) ? selectedYear : 2018;
+      const y = years.includes(selectedYear) ? selectedYear : (years.includes(2021) ? 2021 : Math.max(...years));
       setVisibility(layerIds[y], 'visible');
     }
   }, [selectedIndicator, selectedYear, availableYears, mapLoaded, layersReady]);
@@ -3114,7 +3159,7 @@ export default function Map() {
 
     if (selectedIndicator === 'Walkability') {
       const years = availableYears.length ? availableYears : [2018, 2021];
-      const y = years.includes(selectedYear) ? selectedYear : 2018;
+      const y = years.includes(selectedYear) ? selectedYear : (years.includes(2021) ? 2021 : Math.max(...years));
       setVisibility(layerIds[y], 'visible');
     }
   }, [selectedIndicator, selectedYear, availableYears, mapLoaded, layersReady]);
@@ -3181,7 +3226,7 @@ export default function Map() {
       }
     });
     // Show exactly one depending on selection
-    const y = years.includes(selectedYear) ? selectedYear : years[0];
+    const y = years.includes(selectedYear) ? selectedYear : (years.includes(2021) ? 2021 : years[0]);
     const baseId = (() => {
       if (selectedIndicator === 'Number of jobs') return `number-of-jobs-${y}-layer`;
       if (selectedIndicator === 'Industry specialisation') return `industry-specialisation-${y}-layer`;
@@ -3267,7 +3312,7 @@ export default function Map() {
       }
     });
     if (!isJobs) return;
-    const yr = selectedYear || 2011;
+    const yr = selectedYear || 2021;
     const activeLayer = layerIds[yr];
     if (!activeLayer) return;
     const dimMaskId = `${activeLayer}-dim-mask`;
@@ -3347,7 +3392,7 @@ Do not invent or infer any data values, statistics, or trends.`;
 
             } else if (type === 'precinct') {
                 // Deterministic narrative using computed overlay stats for the active indicator
-                const yr = selectedYear || 2011;
+                const yr = selectedYear || 2021;
                 try {
                   const indicatorNameToUse = selectedIndicator || 'Number of jobs';
                   const stats = await computePrecinctOverlay(name, yr, indicatorNameToUse);
@@ -3363,7 +3408,7 @@ Do not invent or infer any data values, statistics, or trends.`;
                 }
                 return; // bail out, we've set dynamicDescription already
             } else if (type === 'framework') {
-                // Static landing description for Fishermans Bend Framework
+              // Static landing description for Fishermans Bend Overview
                 descriptionCache.current[cacheKey] = LANDING_TEXT;
                 setDynamicDescription(LANDING_TEXT);
                 setIsDescriptionLoading(false);
@@ -3394,7 +3439,7 @@ Do not invent or infer any data values, statistics, or trends.`;
   useEffect(() => {
     if (!(panelFocus && panelFocus.type === 'precinct')) return;
     const name = panelFocus.name;
-    const yr = selectedYear || 2011;
+    const yr = selectedYear || 2021;
     let canceled = false;
     (async () => {
       try {
@@ -3587,13 +3632,8 @@ Do not invent or infer any data values, statistics, or trends.`;
     setSearchText(newIndicator);
     setIndicators(prev => [{ indicator: newIndicator, score: 1.0 }, ...(Array.isArray(prev) ? prev.filter(p => p?.indicator !== newIndicator) : [])]);
     const defaultYearFor = (indName) => {
-      if (indName === 'Accessibility of Social Infrastructure') return 2018;
-      if (indName === 'Housing stress') return 2018;
-      if (indName === 'Walkability') return 2018;
-      if (indName === 'Diversity of residents’ age') return 2016;
-      if (indName === 'Diversity of residents’ income') return 2016;
-      // All others default to 2011
-      return 2011;
+      // Default visualization year across the dashboard
+      return 2021;
     };
     setSelectedYear(defaultYearFor(newIndicator));
     // Immediate enforcement: hide all dynamic layers and show only base layer for the selected indicator
@@ -3608,17 +3648,17 @@ Do not invent or infer any data values, statistics, or trends.`;
           }
         });
         const baseId = (() => {
-          if (newIndicator === 'Number of jobs') return 'number-of-jobs-2011-layer';
-          if (newIndicator === 'Industry specialisation') return 'industry-specialisation-2011-layer';
-          if (newIndicator === 'Land use mix') return 'land-use-mix-2011-layer';
-          if (newIndicator === 'Number of residents') return 'number-of-residents-2011-layer';
-          if (newIndicator === 'Number of dwellings') return 'number-of-dwellings-2011-layer';
-          if (newIndicator === 'Number of residents_SA1') return 'number-of-residents_sa1-2011-layer';
-          if (newIndicator === 'Diversity of residents’ age') return 'diversity-of-residents-age-2016-layer';
-          if (newIndicator === 'Diversity of residents’ income') return 'diversity-of-residents-income-2016-layer';
-          if (newIndicator === 'Accessibility of Social Infrastructure') return 'accessibility-of-social-infrastructure-2018-layer';
-          if (newIndicator === 'Housing stress') return 'housing-stress-2018-layer';
-          if (newIndicator === 'Walkability') return 'walkability-2018-layer';
+          if (newIndicator === 'Number of jobs') return 'number-of-jobs-2021-layer';
+          if (newIndicator === 'Industry specialisation') return 'industry-specialisation-2021-layer';
+          if (newIndicator === 'Land use mix') return 'land-use-mix-2021-layer';
+          if (newIndicator === 'Number of residents') return 'number-of-residents-2021-layer';
+          if (newIndicator === 'Number of dwellings') return 'number-of-dwellings-2021-layer';
+          if (newIndicator === 'Number of residents_SA1') return 'number-of-residents_sa1-2021-layer';
+          if (newIndicator === 'Diversity of residents’ age') return 'diversity-of-residents-age-2021-layer';
+          if (newIndicator === 'Diversity of residents’ income') return 'diversity-of-residents-income-2021-layer';
+          if (newIndicator === 'Accessibility of Social Infrastructure') return 'accessibility-of-social-infrastructure-2021-layer';
+          if (newIndicator === 'Housing stress') return 'housing-stress-2021-layer';
+          if (newIndicator === 'Walkability') return 'walkability-2021-layer';
           return null;
         })();
         if (baseId) {
@@ -4594,8 +4634,15 @@ Do not invent or infer any data values, statistics, or trends.`;
       else spatialScale = 'DZN';
     }
 
+    const spatialUnitPhrase = (() => {
+      if (spatialScale === 'DZN') return 'destination zone (DZN)';
+      if (spatialScale === 'SA1') return 'Statistical Area Level 1 (SA1)';
+      if (spatialScale === 'MB') return 'mesh block (MB)';
+      return spatialScale;
+    })();
+
     if (!hasData) {
-      return `The **${precinct}** precinct intersects with **0** **${spatialScale}** areas based on the **${year}** dataset. Within the precinct, the **${indicatorName}** classes include none. Therefore, the **${precinct}** precinct is dominantly characterized by a lowest level of **${indicatorName}**.`;
+      return `The **${precinct}** precinct intersects with **0** **${spatialScale}** areas based on the **${year}** dataset. Within the precinct, ${spatialUnitPhrase} areas are classified as none. Therefore, the **${precinct}** precinct is characterised by a lowest level of **${indicatorName}**.`;
     }
 
     // Helper formatters
@@ -4616,12 +4663,17 @@ Do not invent or infer any data values, statistics, or trends.`;
     const dominant = classes[0];
     const others = classes.slice(1);
 
+    const isSingularArea = dznIntersectCount === 1;
+    const areaNoun = isSingularArea ? 'area' : 'areas';
+    const classifyVerb = isSingularArea ? 'is' : 'are';
+    const coverVerb = isSingularArea ? 'covers' : 'cover';
+
     // Lead sentence per template
     const s1 = `The **${precinct}** precinct intersects with **${dznIntersectCount}** **${spatialScale}** area${dznIntersectCount === 1 ? '' : 's'} based on the **${year}** dataset.`;
     // Classes present
-    const s2 = `Within the precinct, the **${indicatorName}** classes include ${joinList(presentLabels)}.`;
+    const s2 = `Within the precinct, ${spatialUnitPhrase} ${areaNoun} ${classifyVerb} classified as ${joinList(presentLabels)}.`;
     // Dominant class coverage
-    const s3 = `The “**${dominant.label}**” class covers **${fmtPct(dominant.areaShare)}%** of the precinct area.`;
+    const s3 = `The “**${dominant.label}**” ${areaNoun} ${coverVerb} **${fmtPct(dominant.areaShare)}%** of the precinct area.`;
     // Contrast sentence for other classes (if any)
     let s4 = '';
     if (others.length > 0) {
@@ -4630,7 +4682,7 @@ Do not invent or infer any data values, statistics, or trends.`;
       s4 = ` In contrast, ${joinList(otherLabels)} account for ${joinList(otherPcts)}, respectively.`;
     }
     // Therefore conclusion
-    const s5 = ` Therefore, the **${precinct}** precinct is dominantly characterized by a **${dominant.label}** level of **${indicatorName}**.`;
+    const s5 = ` Therefore, the **${precinct}** precinct is characterised by a **${dominant.label}** level of **${indicatorName}**.`;
 
     // Build change paragraph comparing medians across years using ONLY intersected areas
     const buildChangeParagraph = async () => {
@@ -4694,131 +4746,878 @@ Do not invent or infer any data values, statistics, or trends.`;
   const handleExportToPDF = async () => {
     if (!panelFocus || !map.current) return;
     setIsExporting(true);
+    setExportProgress(0);
+    setExportProgressText('Preparing…');
 
-    // The core of the fix is to wait for the 'idle' event.
-    map.current.once('idle', async () => {
-      try {
-        // 1. Initialize jsPDF
-        const doc = new jsPDF({
-          orientation: 'landscape',
-          unit: 'px',
-          format: 'a4'
-        });
+    try {
+      const stripMarkdown = (text) => String(text || '')
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/\r\n/g, '\n')
+        .trim();
 
-        // 2. Get map canvas image (now that the map is guaranteed to be ready)
-        const mapImage = map.current.getCanvas().toDataURL('image/png');
+      const waitForMapIdleOrTimeout = (timeoutMs = 2500) => new Promise((resolve) => {
+        if (!map.current) return resolve();
+        let done = false;
+        const finish = (t) => {
+          if (done) return;
+          done = true;
+          if (t) clearTimeout(t);
+          resolve();
+        };
+        const onIdle = () => {
+          try { map.current && map.current.off && map.current.off('idle', onIdle); } catch (_) { /* ignore */ }
+          finish();
+        };
+        try {
+          map.current.once('idle', onIdle);
+        } catch (_) {
+          finish();
+          return;
+        }
+        const t = setTimeout(() => {
+          try { map.current && map.current.off && map.current.off('idle', onIdle); } catch (_) { /* ignore */ }
+          finish(t);
+        }, timeoutMs);
+      });
 
-        // 3. Get legend image (if it exists)
-        let legendImage = null;
-        if (selectedIndicator && legendRef.current) {
-          const legendCanvas = await html2canvas(legendRef.current, {
-            backgroundColor: null, // Make background transparent
-            useCORS: true
-          });
-          legendImage = legendCanvas.toDataURL('image/png');
+      const waitForMapRenderOrTimeout = (timeoutMs = 1200) => new Promise((resolve) => {
+        if (!map.current) return resolve();
+        let done = false;
+        const finish = (t) => {
+          if (done) return;
+          done = true;
+          if (t) clearTimeout(t);
+          resolve();
+        };
+        const onRender = () => {
+          try { map.current && map.current.off && map.current.off('render', onRender); } catch (_) { /* ignore */ }
+          finish();
+        };
+        try {
+          map.current.once('render', onRender);
+        } catch (_) {
+          finish();
+          return;
+        }
+        const t = setTimeout(() => {
+          try { map.current && map.current.off && map.current.off('render', onRender); } catch (_) { /* ignore */ }
+          finish(t);
+        }, timeoutMs);
+      });
+
+      const waitForMapFullyReady = async (timeoutMs = 7000) => {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+          const m = map.current;
+          if (!m) return;
+
+          const styleOk = typeof m.isStyleLoaded === 'function' ? m.isStyleLoaded() : true;
+          const tilesOk = typeof m.areTilesLoaded === 'function' ? m.areTilesLoaded() : true;
+          if (styleOk && tilesOk) {
+            // Ensure at least one render after things are ready
+            // eslint-disable-next-line no-await-in-loop
+            await waitForMapRenderOrTimeout(1200);
+            return;
+          }
+
+          // eslint-disable-next-line no-await-in-loop
+          await waitForNextFrame();
         }
 
-        // 3b. Get chart image (if it exists and this is Number of jobs)
-        let chartImage = null;
-        let chartWidthPx = 0, chartHeightPx = 0;
-        if (panelFocus && panelFocus.name === 'Number of jobs' && chartRef.current) {
-          const chartCanvas = await html2canvas(chartRef.current, {
+        // Fallback: don't hang forever
+        await waitForMapRenderOrTimeout(800);
+      };
+
+      const setYearAndWait = async (yr) => {
+        if (!map.current) return;
+        setSelectedYear(yr);
+        // Let React commit year-driven layer changes, then wait for map to render.
+        await waitForNextFrame();
+        try { map.current && map.current.triggerRepaint && map.current.triggerRepaint(); } catch (_) { /* ignore */ }
+        await waitForMapFullyReady(8000);
+      };
+
+      const waitForNextFrame = () => new Promise((resolve) => {
+        if (typeof requestAnimationFrame === 'function') {
+          requestAnimationFrame(resolve);
+          return;
+        }
+        setTimeout(resolve, 0);
+      });
+
+      const fitTextLinesToBox = (doc, text, boxWidth, boxHeight, startFontSize = 10, minFontSize = 8) => {
+        const plain = stripMarkdown(text);
+        for (let fs = startFontSize; fs >= minFontSize; fs -= 1) {
+          doc.setFontSize(fs);
+          const lines = doc.splitTextToSize(plain, boxWidth);
+          const h = doc.getTextDimensions(lines).h;
+          if (h <= boxHeight) return { fontSize: fs, lines };
+        }
+        doc.setFontSize(minFontSize);
+        return { fontSize: minFontSize, lines: doc.splitTextToSize(plain, boxWidth) };
+      };
+
+      // 1. Initialize jsPDF
+      const doc = new jsPDF({
+        orientation: 'landscape',
+        unit: 'px',
+        format: 'a4'
+      });
+
+      // 4. Define PDF Layout
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 40;
+      const contentWidth = pageWidth - (margin * 2);
+
+      const getDefaultYearsForIndicator = (indicatorName) => {
+        if (indicatorName === 'Accessibility of Social Infrastructure') return [2018, 2021];
+        if (indicatorName === 'Housing stress') return [2018, 2021];
+        if (indicatorName === 'Walkability') return [2018, 2021];
+        if (indicatorName === 'Diversity of residents’ age' || indicatorName === 'Diversity of residents’ income') return [2016, 2021];
+        return [2011, 2016, 2021];
+      };
+
+      const normalizeSpatialUnit = (s) => {
+        if (!s) return '';
+        if (/mesh\s*block/i.test(s)) return 'MB';
+        if (/Statistical\s*Area\s*Level\s*1/i.test(s)) return 'SA1';
+        if (/Destination\s*Zone/i.test(s)) return 'DZN';
+        const up = String(s).toUpperCase();
+        if (up === 'MB' || up === 'SA1' || up === 'DZN') return up;
+        return up;
+      };
+
+      const fmtValueForIndicator = (indicatorName, v) => {
+        if (!isFinite(v)) return 'n/a';
+        if (indicatorName === 'Number of jobs') return `${Math.round(v).toLocaleString()}`;
+        if (indicatorName === 'Number of residents' || indicatorName === 'Number of dwellings' || indicatorName === 'Number of residents_SA1') return `${Math.round(v).toLocaleString()}`;
+        if (indicatorName === 'Housing stress') return `${Number(v).toFixed(1)}%`;
+        // Most indices are 0..1 or small scores; keep concise.
+        return `${Number(v).toFixed(2)}`;
+      };
+
+      const getSourceDataOrFetch = async (sourceId, url) => {
+        try {
+          const src = map.current && map.current.getSource ? map.current.getSource(sourceId) : null;
+          if (src && src._data && src._data.features) return src._data;
+        } catch (_) { /* ignore */ }
+        if (!url) return null;
+        try {
+          const r = await fetch(url);
+          if (!r.ok) return null;
+          return await r.json();
+        } catch (_) {
+          return null;
+        }
+      };
+
+      // Simple point-in-polygon for Polygon/MultiPolygon (WGS84) without turf.
+      const pointInPolygon = (pt, geom) => {
+        try {
+          if (!pt || !geom) return false;
+          const [x, y] = pt;
+          const testRing = (ring) => {
+            let inside = false;
+            for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+              const xi = ring[i][0], yi = ring[i][1];
+              const xj = ring[j][0], yj = ring[j][1];
+              const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-12) + xi);
+              if (intersect) inside = !inside;
+            }
+            return inside;
+          };
+          if (geom.type === 'Polygon') {
+            const ring = (geom.coordinates && geom.coordinates[0]) || [];
+            return testRing(ring);
+          }
+          if (geom.type === 'MultiPolygon') {
+            for (const poly of (geom.coordinates || [])) {
+              const ring = (poly && poly[0]) || [];
+              if (testRing(ring)) return true;
+            }
+          }
+        } catch (_) { /* ignore */ }
+        return false;
+      };
+
+      const hexToRgb = (hex) => {
+        try {
+          const h = String(hex || '').replace('#', '').trim();
+          if (h.length === 3) {
+            const r = parseInt(h[0] + h[0], 16);
+            const g = parseInt(h[1] + h[1], 16);
+            const b = parseInt(h[2] + h[2], 16);
+            return [r, g, b];
+          }
+          if (h.length >= 6) {
+            const r = parseInt(h.slice(0, 2), 16);
+            const g = parseInt(h.slice(2, 4), 16);
+            const b = parseInt(h.slice(4, 6), 16);
+            return [r, g, b];
+          }
+        } catch (_) { /* ignore */ }
+        return [0, 0, 0];
+      };
+
+      const drawMiniBarChart = (doc, x, y, w, h, series, opts = {}) => {
+        const activeYear = Number(opts.activeYear);
+        const title = String(opts.title || '').trim();
+        const yLabel = String(opts.yLabel || '').trim();
+        const isFixed01 = !!opts.fixed01;
+        const years = (Array.isArray(series) ? series : []).map(d => Number(d?.year)).filter(Boolean);
+        const data = (Array.isArray(series) ? series : [])
+          .map(d => ({ year: Number(d?.year), value: (d?.value === null || typeof d?.value === 'undefined' || !isFinite(d?.value)) ? 0 : Number(d.value) }))
+          .filter(d => isFinite(d.year));
+        if (!data.length) return;
+
+        // Card background
+        doc.setFillColor(255, 255, 255);
+        doc.setDrawColor(233, 236, 239);
+        doc.setLineWidth(1);
+        doc.roundedRect(x, y, w, h, 6, 6, 'FD');
+
+        // Title
+        const titleH = title ? 14 : 0;
+        if (title) {
+          doc.setTextColor(31, 41, 55);
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(10);
+          doc.text(title, x + 10, y + 14);
+        }
+
+        // Plot area
+        const pad = { l: 42, r: 10, t: 10 + titleH, b: 22 };
+        const plotX = x + pad.l;
+        const plotY = y + pad.t;
+        const plotW = Math.max(1, w - pad.l - pad.r);
+        const plotH = Math.max(1, h - pad.t - pad.b);
+
+        const maxVal = isFixed01 ? 1.0 : Math.max(1, ...data.map(d => d.value));
+        const axisMax = maxVal;
+        const yScale = (v) => plotY + plotH * (1 - (axisMax ? (v / axisMax) : 0));
+
+        // Y grid + ticks
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        const ticks = isFixed01 ? [0, 0.25, 0.5, 0.75, 1.0] : [0, 0.25, 0.5, 0.75, 1.0].map(t => t * axisMax);
+        for (const tv of ticks) {
+          const yy = yScale(tv);
+          doc.setDrawColor(241, 243, 245);
+          doc.setLineWidth(1);
+          doc.line(plotX, yy, plotX + plotW, yy);
+          doc.setTextColor(108, 117, 125);
+          const label = isFixed01 ? Number(tv).toFixed(2) : `${Math.round(tv).toLocaleString()}`;
+          doc.text(label, x + pad.l - 8, yy + 3, { align: 'right' });
+        }
+        // Y axis
+        doc.setDrawColor(173, 181, 189);
+        doc.line(plotX, plotY, plotX, plotY + plotH);
+
+        // Y label (rotated)
+        if (yLabel) {
+          doc.setTextColor(73, 80, 87);
+          doc.setFontSize(8);
+          // place within left margin
+          doc.text(yLabel, x + 12, plotY + plotH / 2, { angle: 90, align: 'center' });
+        }
+
+        // X labels and bars
+        const n = data.length;
+        const xStep = plotW / n;
+        const barW = xStep * 0.45;
+        const activeFill = hexToRgb('#2563EB');
+        const inactiveFill = hexToRgb('#94a3b8');
+
+        for (let i = 0; i < n; i++) {
+          const d = data[i];
+          const bx = plotX + i * xStep + (xStep - barW) / 2;
+          const by = yScale(d.value);
+          let bh = Math.max(0, (plotY + plotH) - by);
+          if (d.value > 0 && bh > 0 && bh < 2) bh = 2;
+          const isActive = isFinite(activeYear) && d.year === activeYear;
+          const fill = isActive ? activeFill : inactiveFill;
+          doc.setFillColor(fill[0], fill[1], fill[2]);
+          doc.rect(bx, by, barW, bh, 'F');
+
+          doc.setTextColor(55, 65, 81);
+          doc.setFontSize(9);
+          doc.text(String(d.year), plotX + i * xStep + xStep / 2, y + h - 8, { align: 'center' });
+        }
+
+        // X axis title
+        doc.setTextColor(73, 80, 87);
+        doc.setFontSize(8);
+        doc.text('Year', plotX + plotW / 2, y + h - 2, { align: 'center' });
+      };
+
+      const buildIntersectedAreaCalloutModels = async (overlayStats, indicatorName, years) => {
+        const stats = overlayStats || {};
+        const overlayYear = Number(stats.year) || (years && years.length ? years[years.length - 1] : selectedYear) || 2021;
+        const unit = normalizeSpatialUnit(stats.spatialUnit || '') || (() => {
+          const meta = indicatorMetadata && indicatorMetadata[metadataKeyFor(indicatorName)];
+          const s = meta && typeof meta['Spatial scale'] === 'string' ? meta['Spatial scale'] : '';
+          return normalizeSpatialUnit(s);
+        })() || (/resident|dwell/i.test(indicatorName) ? 'MB' : (/land\s*use|age|income|social|housing|walk/i.test(indicatorName) ? 'SA1' : 'DZN'));
+
+        const intersections = Array.isArray(stats.intersections) ? stats.intersections : [];
+        const ordered = [...intersections].sort((a, b) => (Number(b?.areaPct) || 0) - (Number(a?.areaPct) || 0));
+        if (!ordered.length) return { unit, models: [] };
+
+        // SA1 combined sources (single file, multi-year properties)
+        const sa1Config = {
+          'Land use mix': { sourceId: 'land-use-mix-data-source', url: '/data/Land_Use_Mix__SA1_11_16_21.geojson', codeProp: 'SA1_CODE_2', propByYear: { 2011: 'LUM_11', 2016: 'LUM_16', 2021: 'LUM_21' } },
+          'Number of residents_SA1': { sourceId: 'residents-sa1-data-source', url: '/data/Number_of_Residents_and_Dwellings_SA1_11_16_21.geojson', codeProp: 'SA1_CODE_2', propByYear: { 2011: 'Person_11', 2016: 'Person_16', 2021: 'Person_21' } },
+          'Diversity of residents’ age': { sourceId: 'age-mix-data-source', url: '/data/Age_Mix__SA1_16_21.geojson', codeProp: 'SA1_CODE_2', propByYear: { 2016: 'Age_Mix_16', 2021: 'Age_Mix_21' } },
+          'Diversity of residents’ income': { sourceId: 'income-mix-data-source', url: '/data/Income_Mix_SA1_16_21.geojson', codeProp: 'SA1_CODE_2', propByYear: { 2016: 'Inc_Mix_16', 2021: 'Inc_Mix_21' } },
+          'Accessibility of Social Infrastructure': { sourceId: 'social-infra-data-source', url: '/data/Social_Infrastructure_Index_SA1_18_21.geojson', codeProp: 'SA1_CODE_2', propByYear: { 2018: 'SoInfra_18', 2021: 'SoInfra_21' } },
+          'Housing stress': { sourceId: 'housing-stress-data-source', url: '/data/Housing_Stress_SA1_18_21.geojson', codeProp: 'SA1_CODE_2', propByYear: { 2018: 'HouStre_18', 2021: 'HouStre_21' } },
+          'Walkability': { sourceId: 'walkability-data-source', url: '/data/Walkability_SA1_16_21.geojson', codeProp: 'SA1_CODE_2', propByYear: { 2018: 'Walkabi_18', 2021: 'Walkabi_21' } }
+        };
+
+        const mbConfig = {
+          'Number of residents': {
+            sourcesByYear: {
+              2011: { sourceId: 'mb-2011-data-source', url: '/data/Number_of_Residents_and_Dwellings_MB_11.geojson', codeProp: 'MB_CODE11', valProp: 'Person_11' },
+              2016: { sourceId: 'mb-2016-data-source', url: '/data/Number_of_Residents_and_Dwellings_MB_16.geojson', codeProp: 'MB_CODE16', valProp: 'Person_16' },
+              2021: { sourceId: 'mb-2021-data-source', url: '/data/Number_of_Residents_and_Dwellings_MB_21.geojson', codeProp: 'MB_CODE21', valProp: 'Person_21' }
+            }
+          },
+          'Number of dwellings': {
+            sourcesByYear: {
+              2011: { sourceId: 'mb-2011-data-source', url: '/data/Number_of_Residents_and_Dwellings_MB_11.geojson', codeProp: 'MB_CODE11', valProp: 'Dwell_11' },
+              2016: { sourceId: 'mb-2016-data-source', url: '/data/Number_of_Residents_and_Dwellings_MB_16.geojson', codeProp: 'MB_CODE16', valProp: 'Dwel_16' },
+              2021: { sourceId: 'mb-2021-data-source', url: '/data/Number_of_Residents_and_Dwellings_MB_21.geojson', codeProp: 'MB_CODE21', valProp: 'Dwell_21' }
+            }
+          }
+        };
+
+        const isJobs = indicatorName === 'Number of jobs';
+        const isSpec = indicatorName === 'Industry specialisation';
+        const isSA1 = !!sa1Config[indicatorName];
+        const isMB = !!mbConfig[indicatorName];
+
+        // Preload required feature collections once per page.
+        let jobsFc = null;
+        let specFc = null;
+        let sa1Fc = null;
+        const mbFcsByYear = {};
+
+        if (isJobs) {
+          const yr = overlayYear;
+          jobsFc = jobsGeoByYear.current[yr] || await getSourceDataOrFetch(
+            `jobs-dzn-${yr}-data-source`,
+            yr === 2011 ? '/data/Number_of_Jobs_DZN_11.geojson' : yr === 2016 ? '/data/Number_of_Jobs_DZN_16.geojson' : '/data/Number_of_Jobs_DZN_21.geojson'
+          );
+          if (jobsFc && !jobsGeoByYear.current[yr]) jobsGeoByYear.current[yr] = jobsFc;
+        } else if (isSpec) {
+          const yr = overlayYear;
+          specFc = specGeoByYear.current[yr] || await getSourceDataOrFetch(
+            `spec-dzn-${yr}-data-source`,
+            yr === 2011 ? '/data/Inudstry_Specialisation_DZN_11.geojson' : yr === 2016 ? '/data/Inudstry_Specialisation_DZN_16.geojson' : '/data/Inudstry_Specialisation_DZN_21.geojson'
+          );
+          if (specFc && (!specGeoByYear.current || !specGeoByYear.current[yr])) {
+            try {
+              if (specGeoByYear.current) specGeoByYear.current[yr] = specFc;
+            } catch (_) { /* ignore */ }
+          }
+        } else if (isSA1) {
+          const cfg = sa1Config[indicatorName];
+          sa1Fc = await getSourceDataOrFetch(cfg.sourceId, cfg.url);
+        } else if (isMB) {
+          const cfg = mbConfig[indicatorName];
+          for (const y of years) {
+            const ys = cfg.sourcesByYear[y];
+            if (!ys) continue;
+            // eslint-disable-next-line no-await-in-loop
+            mbFcsByYear[y] = await getSourceDataOrFetch(ys.sourceId, ys.url);
+          }
+          // Ensure we at least have the overlayYear dataset loaded for centroid lookup.
+          if (!mbFcsByYear[overlayYear] && cfg.sourcesByYear[overlayYear]) {
+            mbFcsByYear[overlayYear] = await getSourceDataOrFetch(cfg.sourcesByYear[overlayYear].sourceId, cfg.sourcesByYear[overlayYear].url);
+          }
+        }
+
+        const models = [];
+        for (const it of ordered) {
+          const code = it.code || '';
+          const pct = isFinite(it.areaPct) ? (it.areaPct * 100) : 0;
+          const pctText = isFinite(pct) ? `${pct.toFixed(1)}%` : 'n/a';
+          const cls = it.classLabel || '';
+
+          let valsByYear = null;
+          let anchorLngLat = null;
+          if (isJobs) {
+            // Compute trend for a representative point inside this intersected area.
+            try {
+              const yr = overlayYear;
+              const feats = jobsFc && jobsFc.features ? jobsFc.features : [];
+              const codePropYr = yr === 2011 ? 'DZN_CODE11' : yr === 2016 ? 'DZN_CODE16' : 'DZN_CODE21';
+              const f = feats.find(ff => (ff.properties && String(ff.properties[codePropYr] || '') === String(code)));
+              const c = f && f.geometry ? geomCentroid(f.geometry) : null;
+              if (c) {
+                valsByYear = computeJobsForPoint(c[0], c[1]);
+                anchorLngLat = [c[0], c[1]];
+              }
+            } catch (_) { valsByYear = null; }
+          } else if (isSpec) {
+            try {
+              const yr = overlayYear;
+              const feats = specFc && specFc.features ? specFc.features : [];
+              const codePropYr = yr === 2011 ? 'DZN_CODE11' : yr === 2016 ? 'DZN_CODE16' : 'DZN_CODE21';
+              const f = feats.find(ff => (ff.properties && String(ff.properties[codePropYr] || '') === String(code)));
+              const c = f && f.geometry ? geomCentroid(f.geometry) : null;
+              if (c) {
+                valsByYear = computeSpecForPoint(c[0], c[1]);
+                anchorLngLat = [c[0], c[1]];
+              }
+            } catch (_) { valsByYear = null; }
+          } else if (isSA1) {
+            try {
+              const cfg = sa1Config[indicatorName];
+              const feats = sa1Fc && sa1Fc.features ? sa1Fc.features : [];
+              const f = feats.find(ff => String(ff.properties?.[cfg.codeProp] || '') === String(code));
+              if (f) {
+                valsByYear = {};
+                for (const y of years) {
+                  const prop = cfg.propByYear[y];
+                  valsByYear[y] = prop ? Number(f.properties?.[prop]) : null;
+                }
+                const c = f.geometry ? geomCentroid(f.geometry) : null;
+                if (c) anchorLngLat = [c[0], c[1]];
+              }
+            } catch (_) { valsByYear = null; }
+          } else if (isMB) {
+            try {
+              const cfg = mbConfig[indicatorName];
+              const lastYear = years[years.length - 1];
+              const y0 = overlayYear || lastYear;
+              const y0Spec = cfg.sourcesByYear[y0] || cfg.sourcesByYear[lastYear];
+              const fc0 = mbFcsByYear[y0] || mbFcsByYear[lastYear];
+              const feats0 = fc0 && fc0.features ? fc0.features : [];
+              const f0 = feats0.find(ff => String(ff.properties?.[y0Spec.codeProp] || '') === String(code));
+              const c = f0 && f0.geometry ? geomCentroid(f0.geometry) : null;
+              if (c) {
+                valsByYear = {};
+                for (const y of years) {
+                  const ys = cfg.sourcesByYear[y];
+                  if (!ys) { valsByYear[y] = null; continue; }
+                  const fcY = mbFcsByYear[y];
+                  const featsY = fcY && fcY.features ? fcY.features : [];
+                  const match = featsY.find(ff => ff.geometry && pointInPolygon(c, ff.geometry));
+                  valsByYear[y] = match ? Number(match.properties?.[ys.valProp]) : null;
+                }
+                anchorLngLat = [c[0], c[1]];
+              }
+            } catch (_) { valsByYear = null; }
+          }
+
+          const series = (valsByYear && years && years.length)
+            ? years.map(y => ({ year: y, value: (valsByYear[y] === null || typeof valsByYear[y] === 'undefined') ? null : Number(valsByYear[y]) }))
+            : (years && years.length)
+              ? [{ year: years[years.length - 1], value: (it.value === null || typeof it.value === 'undefined') ? null : Number(it.value) }]
+              : [];
+
+          models.push({
+            unit,
+            code,
+            areaPctText: pctText,
+            classLabel: cls,
+            series,
+            anchorLngLat
+          });
+        }
+
+        return { unit, models };
+      };
+
+      const originalYear = selectedYear;
+
+      const effectiveIndicator = selectedIndicator || (panelFocus.type === 'indicator' ? panelFocus.name : null) || 'Number of jobs';
+      const yearsToExport = (Array.isArray(availableYears) && availableYears.length)
+        ? [...availableYears]
+        : (selectedYear ? [selectedYear] : getDefaultYearsForIndicator(effectiveIndicator));
+
+      const exportIndicatorPages = panelFocus.type === 'indicator' && yearsToExport.length > 0;
+      const exportPrecinctPages = panelFocus.type === 'precinct' && yearsToExport.length > 0;
+
+      const totalPages = (exportIndicatorPages || exportPrecinctPages) ? yearsToExport.length : 1;
+      const setProgress = (pct, text) => {
+        setExportProgress(Math.max(0, Math.min(100, Math.round(pct))));
+        if (typeof text === 'string') setExportProgressText(text);
+      };
+
+      // Give the map a moment to settle before starting
+      await waitForMapIdleOrTimeout(1200);
+
+      const buildFbOverviewTextForYear = (indicatorName, yr) => {
+        if (indicatorName === 'Number of jobs' || indicatorName === 'Industry specialisation') {
+          try {
+            const stats = buildLegendComparisonStats(indicatorName, yr);
+            return stats?.text || '';
+          } catch (_) {
+            return '';
+          }
+        }
+        return '';
+      };
+
+      const captureLegendIfPresent = async () => {
+        try {
+          if (!legendExportRef.current) return null;
+          await waitForNextFrame();
+          const canvas = await html2canvas(legendExportRef.current, {
             backgroundColor: '#ffffff',
-            useCORS: true
+            useCORS: true,
+            scale: 1
           });
-          chartImage = chartCanvas.toDataURL('image/png');
-          chartWidthPx = chartCanvas.width;
-          chartHeightPx = chartCanvas.height;
+          return { dataUrl: canvas.toDataURL('image/png'), width: canvas.width, height: canvas.height };
+        } catch (_) {
+          return null;
+        }
+      };
+
+      const legendVariesByYear = selectedIndicator === 'Number of jobs' || selectedIndicator === 'Industry specialisation';
+      let cachedLegendCapture = null;
+
+      const addYearPage = async (yr, pageIndex) => {
+        if (pageIndex > 0) doc.addPage();
+
+        setProgress(((pageIndex + 0.05) / totalPages) * 100, `Preparing page ${pageIndex + 1} of ${totalPages}…`);
+        await setYearAndWait(yr);
+
+        setProgress(((pageIndex + 0.25) / totalPages) * 100, `Rendering map for ${yr}…`);
+        await waitForMapFullyReady(8000);
+
+        // Give React a moment to render year-specific legend content
+        await waitForNextFrame();
+
+        setProgress(((pageIndex + 0.45) / totalPages) * 100, 'Capturing legend…');
+        // eslint-disable-next-line no-await-in-loop
+        const legendCapture = (!legendVariesByYear && cachedLegendCapture)
+          ? cachedLegendCapture
+          : await captureLegendIfPresent();
+        if (!legendVariesByYear && !cachedLegendCapture && legendCapture) cachedLegendCapture = legendCapture;
+
+        setProgress(((pageIndex + 0.60) / totalPages) * 100, 'Composing PDF page…');
+
+        let mapImage = '';
+        try {
+          mapImage = map.current.getCanvas().toDataURL('image/png');
+        } catch (_) {
+          mapImage = '';
         }
 
-        // 4. Define PDF Layout
-        const pageWidth = doc.internal.pageSize.getWidth();
-        const pageHeight = doc.internal.pageSize.getHeight();
-        const margin = 40;
-        const contentWidth = pageWidth - (margin * 2);
-        
-        // 5. Add Content to PDF
         // --- Title & Subtitle ---
         doc.setFontSize(22);
         doc.setFont('helvetica', 'bold');
         doc.text('Fishermans Bend Data Report', margin, margin);
         doc.setFontSize(16);
         doc.setFont('helvetica', 'normal');
-        doc.text(panelFocus.name, margin, margin + 25);
-        
-        const contentStartY = margin + 50;
+        doc.text(`${panelFocus.name} — ${yr}`, margin, margin + 25);
 
-        // --- Map Image (Left side) ---
-        const mapAspectRatio = map.current.getCanvas().height / map.current.getCanvas().width;
-        const mapWidth = contentWidth * 0.6; // Map takes 60% of width
+        const contentStartY = margin + 50;
+        const availableHeight = pageHeight - contentStartY - margin;
+
+        // Layout: top row (map + indicator narrative), bottom row (FB overview under map)
+        const topRowHeight = Math.max(160, Math.round(availableHeight * 0.62));
+        const bottomRowHeight = Math.max(0, availableHeight - topRowHeight);
+
+        // --- Map Image (Left side, top row) ---
+        const canvas = map.current.getCanvas();
+        const mapAspectRatio = canvas.height / canvas.width;
+        let mapWidth = contentWidth * 0.6;
+        let mapHeight = mapWidth * mapAspectRatio;
+        if (mapHeight > topRowHeight) {
+          mapHeight = topRowHeight;
+          mapWidth = mapHeight / mapAspectRatio;
+        }
+        doc.addImage(mapImage, 'PNG', margin, contentStartY, mapWidth, mapHeight);
+
+        // --- Indicator Narrative (Right side, top row) ---
+        const rightContentX = margin + mapWidth + 20;
+        const rightContentWidth = Math.max(120, contentWidth - mapWidth - 20);
+
+        // Reserve space for legend (includes charts) strictly below narrative (no overlap)
+        const legendGap = legendCapture ? 10 : 0;
+        const maxLegendW = Math.min(rightContentWidth, 320);
+        const legendAspect = (legendCapture && legendCapture.width) ? (legendCapture.height / legendCapture.width) : 0.75;
+        const legendMaxH = legendCapture ? Math.min(260, Math.round(topRowHeight * 0.55)) : 0;
+        const legendH = legendCapture ? legendMaxH : 0;
+        const legendW = legendCapture ? Math.min(maxLegendW, legendH / legendAspect) : 0;
+        const indicatorBoxHeight = Math.max(40, topRowHeight - (legendH + legendGap));
+
+        doc.setFont('helvetica', 'normal');
+        const indicatorText = `Year: ${yr}\n\n${dynamicDescription || ''}`;
+        const indFit = fitTextLinesToBox(
+          doc,
+          indicatorText,
+          rightContentWidth,
+          Math.max(10, indicatorBoxHeight - 6),
+          10,
+          8
+        );
+
+        // Compute FB fit too (if present), then force same font size for both blocks
+        const fbText = buildFbOverviewTextForYear(selectedIndicator, yr);
+        const hasFbText = bottomRowHeight > 30 && String(fbText || '').trim().length;
+        let fbFit = null;
+        if (hasFbText) {
+          doc.setFont('helvetica', 'normal');
+          const fbBoxYTmp = (contentStartY + topRowHeight + 18) + 12;
+          const fbBoxHeightTmp = Math.max(0, (pageHeight - margin) - fbBoxYTmp);
+          fbFit = fitTextLinesToBox(
+            doc,
+            fbText,
+            mapWidth,
+            Math.max(10, fbBoxHeightTmp - 2),
+            10,
+            8
+          );
+        }
+        const unifiedFs = fbFit ? Math.min(indFit.fontSize, fbFit.fontSize) : indFit.fontSize;
+        doc.setFontSize(unifiedFs);
+        // Ensure the indicator narrative does not overflow into the legend area
+        const clampLinesToHeight = (lines, maxHeightPx) => {
+          if (!Array.isArray(lines) || lines.length === 0) return [];
+          let out = lines;
+          try {
+            // Trim from the end until it fits in the box
+            while (out.length && doc.getTextDimensions(out).h > maxHeightPx) {
+              out = out.slice(0, -1);
+            }
+          } catch (_) { /* ignore */ }
+          return out;
+        };
+
+        const rawIndLines = doc.splitTextToSize(stripMarkdown(indicatorText), rightContentWidth);
+        const indLines = clampLinesToHeight(rawIndLines, indicatorBoxHeight);
+        doc.text(indLines, rightContentX, contentStartY);
+        let renderedIndHeight = 0;
+        try { renderedIndHeight = doc.getTextDimensions(indLines).h; } catch (_) { renderedIndHeight = 0; }
+
+        if (legendCapture) {
+          // Place legend immediately below the indicator narrative (no overlap)
+          const legendY = contentStartY + renderedIndHeight + legendGap;
+          doc.addImage(legendCapture.dataUrl, 'PNG', rightContentX, legendY, legendW, legendH);
+        }
+
+        // --- Fishermans Bend Overview (Bottom row, under map, as TEXT) ---
+        const fbTitleY = contentStartY + topRowHeight + 18;
+        if (bottomRowHeight > 30) {
+          if (String(fbText || '').trim().length) {
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(12);
+            doc.text('Fishermans Bend Overview', margin, fbTitleY);
+
+            doc.setFont('helvetica', 'normal');
+            const fbBoxY = fbTitleY + 12;
+            doc.setFontSize(unifiedFs);
+            const fbLines = doc.splitTextToSize(stripMarkdown(fbText), mapWidth);
+            if (fbLines && fbLines.length) {
+              doc.text(fbLines, margin, fbBoxY);
+            }
+          }
+        }
+
+        setProgress(((pageIndex + 1) / totalPages) * 100, `Finished page ${pageIndex + 1} of ${totalPages}`);
+      };
+
+      const addPrecinctYearPage = async (yr, pageIndex) => {
+        if (pageIndex > 0) doc.addPage();
+
+        setProgress(((pageIndex + 0.05) / totalPages) * 100, `Preparing page ${pageIndex + 1} of ${totalPages}…`);
+        await setYearAndWait(yr);
+
+        setProgress(((pageIndex + 0.25) / totalPages) * 100, `Rendering map for ${yr}…`);
+        await waitForMapFullyReady(8000);
+
+        setProgress(((pageIndex + 0.45) / totalPages) * 100, 'Computing intersected areas…');
+        const precinctName = panelFocus.name;
+        const ind = effectiveIndicator;
+        // eslint-disable-next-line no-await-in-loop
+        const overlay = await computePrecinctOverlay(precinctName, yr, ind);
+        const precinctText = generatePrecinctNarrativeDeterministic(overlay, ind);
+        // eslint-disable-next-line no-await-in-loop
+        const callouts = await buildIntersectedAreaCalloutModels({ ...overlay, year: yr }, ind, yearsToExport);
+
+        setProgress(((pageIndex + 0.60) / totalPages) * 100, 'Composing PDF page…');
+
+        let mapImage = '';
+        try {
+          mapImage = map.current.getCanvas().toDataURL('image/png');
+        } catch (_) {
+          mapImage = '';
+        }
+
+        doc.setFontSize(22);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Fishermans Bend Data Report', margin, margin);
+        doc.setFontSize(16);
+        doc.setFont('helvetica', 'normal');
+        doc.text(`${precinctName} — ${ind} — ${yr}`, margin, margin + 25);
+
+        const contentStartY = margin + 50;
+        const availableHeight = pageHeight - contentStartY - margin;
+        const topRowHeight = Math.max(160, Math.round(availableHeight * 0.62));
+        const bottomRowHeight = Math.max(0, availableHeight - topRowHeight);
+
+        // Map left
+        const canvas = map.current.getCanvas();
+        const mapAspectRatio = canvas.height / canvas.width;
+        let mapWidth = contentWidth * 0.6;
+        let mapHeight = mapWidth * mapAspectRatio;
+        if (mapHeight > topRowHeight) {
+          mapHeight = topRowHeight;
+          mapWidth = mapHeight / mapAspectRatio;
+        }
+        doc.addImage(mapImage, 'PNG', margin, contentStartY, mapWidth, mapHeight);
+
+        // Right side: precinct narrative
+        const rightContentX = margin + mapWidth + 20;
+        const rightContentWidth = Math.max(120, contentWidth - mapWidth - 20);
+
+        const narrativeBoxHeight = Math.max(70, topRowHeight);
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(10);
+        const narrativeLinesRaw = doc.splitTextToSize(stripMarkdown(precinctText), rightContentWidth);
+        const clampLinesToHeight = (lines, maxHeightPx) => {
+          if (!Array.isArray(lines) || !lines.length) return [];
+          let out = lines;
+          try {
+            while (out.length && doc.getTextDimensions(out).h > maxHeightPx) {
+              out = out.slice(0, -1);
+            }
+          } catch (_) { /* ignore */ }
+          return out;
+        };
+        const narrativeLines = clampLinesToHeight(narrativeLinesRaw, narrativeBoxHeight);
+        doc.text(narrativeLines, rightContentX, contentStartY);
+        let narrativeH = 0;
+        try { narrativeH = doc.getTextDimensions(narrativeLines).h; } catch (_) { narrativeH = 0; }
+
+        // Bottom section: list intersected-area values as text (no charts)
+        try {
+          const models = (callouts && Array.isArray(callouts.models)) ? callouts.models : [];
+          if (bottomRowHeight > 70 && models.length) {
+            const bottomStartY = contentStartY + topRowHeight + 12;
+            const bottomH = Math.max(0, pageHeight - margin - bottomStartY);
+
+            const valueForYear = (series, year) => {
+              try {
+                const s = (Array.isArray(series) ? series : []).find(d => Number(d?.year) === Number(year));
+                const v = (s && isFinite(s.value)) ? Number(s.value) : null;
+                return fmtValueForIndicator(ind, v);
+              } catch (_) {
+                return 'n/a';
+              }
+            };
+
+            // Section title
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(12);
+            doc.setTextColor(17, 24, 39);
+            doc.text('Intersected areas', margin, bottomStartY - 2);
+
+            // Two-column flowing text
+            const gap = 14;
+            const cols = 2;
+            const colW = (contentWidth - gap * (cols - 1)) / cols;
+            const colX = (c) => margin + c * (colW + gap);
+            const startY = bottomStartY + 14;
+            const maxY = bottomStartY + bottomH;
+
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(9);
+            doc.setTextColor(55, 65, 81);
+
+            let c = 0;
+            let y = startY;
+
+            for (const m of models) {
+              const header = `${m.unit} ${m.code} (${m.areaPctText})`;
+              const classSuffix = m.classLabel ? ` — ${String(m.classLabel)}` : '';
+              const valText = valueForYear(m.series, yr);
+              const itemText = `- ${header}: ${valText}${classSuffix}`;
+              const lines = doc.splitTextToSize(itemText, colW);
+              let h = 0;
+              try { h = doc.getTextDimensions(lines).h; } catch (_) { h = 10; }
+
+              if (y + h > maxY && c === 0) {
+                c = 1;
+                y = startY;
+              }
+              if (y + h > maxY) break;
+
+              doc.text(lines, colX(c), y);
+              y += h + 2;
+            }
+          }
+        } catch (_) {
+          // Keep export working even if text rendering fails
+        }
+
+        setProgress(((pageIndex + 1) / totalPages) * 100, `Finished page ${pageIndex + 1} of ${totalPages}`);
+      };
+
+      if (exportIndicatorPages) {
+        for (let i = 0; i < yearsToExport.length; i++) {
+          // eslint-disable-next-line no-await-in-loop
+          await addYearPage(yearsToExport[i], i);
+        }
+      } else if (exportPrecinctPages) {
+        for (let i = 0; i < yearsToExport.length; i++) {
+          // eslint-disable-next-line no-await-in-loop
+          await addPrecinctYearPage(yearsToExport[i], i);
+        }
+      } else {
+        // Fallback: single-page export (existing behaviour) for non-indicator panels
+        setProgress(35, 'Capturing map…');
+        const mapImage = map.current.getCanvas().toDataURL('image/png');
+
+        doc.setFontSize(22);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Fishermans Bend Data Report', margin, margin);
+        doc.setFontSize(16);
+        doc.setFont('helvetica', 'normal');
+        doc.text(panelFocus.name, margin, margin + 25);
+
+        const contentStartY = margin + 50;
+        const canvas = map.current.getCanvas();
+        const mapAspectRatio = canvas.height / canvas.width;
+        const mapWidth = contentWidth * 0.6;
         const mapHeight = mapWidth * mapAspectRatio;
         doc.addImage(mapImage, 'PNG', margin, contentStartY, mapWidth, mapHeight);
 
-        // --- Text & Legend (Right side) ---
         const rightContentX = margin + mapWidth + 20;
         const rightContentWidth = contentWidth - mapWidth - 20;
 
-        // --- Description Text ---
         doc.setFontSize(10);
         doc.setFont('helvetica', 'normal');
-        const plainText = dynamicDescription.replace(/\*\*(.*?)\*\*/g, '$1'); // Remove markdown
+        const plainText = stripMarkdown(dynamicDescription);
         const splitText = doc.splitTextToSize(plainText, rightContentWidth);
         doc.text(splitText, rightContentX, contentStartY);
-
-        // --- Right column layout: Chart BELOW text and ABOVE legend (scale to fit on one page) ---
-        const textHeight = doc.getTextDimensions(splitText).h;
-        const rightYStart = contentStartY + textHeight + 20;
-        const rightYEnd = pageHeight - margin;
-        const availableRightHeight = Math.max(0, rightYEnd - rightYStart);
-
-        // Base widths (respect right column width)
-        const baseChartWidth = Math.min(200, rightContentWidth);
-        const baseLegendWidth = Math.min(150, rightContentWidth);
-
-        // Derive natural aspect ratios
-        const chartAspect = chartHeightPx && chartWidthPx ? (chartHeightPx / chartWidthPx) : 0.6;
-        // Prefer DOM size for legend aspect to avoid an extra canvas render
-        const legendDom = legendRef.current;
-        const legendAspectRatio = legendDom && legendDom.offsetWidth ? (legendDom.offsetHeight / legendDom.offsetWidth) : 0.6;
-
-        // Natural heights at base widths
-        const chartTitleHeight = chartImage ? 14 : 0; // space for chart title
-        const chartGap = chartImage && legendImage ? 12 : 0; // gap between chart and legend
-        const naturalChartHeight = chartImage ? baseChartWidth * chartAspect : 0;
-        const naturalLegendHeight = legendImage ? baseLegendWidth * legendAspectRatio : 0;
-
-        // Compute total height needed and scale factor to fit
-        const totalNeeded = chartTitleHeight + naturalChartHeight + chartGap + naturalLegendHeight;
-        const scale = totalNeeded > 0 ? Math.min(1, availableRightHeight / totalNeeded) : 1;
-
-        let yCursor = rightYStart;
-        if (chartImage) {
-          const chartTitle = selectedDZNCode ? `Total jobs by year` : 'Total jobs by year';
-          const chartW = baseChartWidth * scale;
-          const chartH = naturalChartHeight * scale;
-          doc.setFontSize(11);
-          doc.text(chartTitle, rightContentX, yCursor - 6);
-          doc.addImage(chartImage, 'PNG', rightContentX, yCursor, chartW, chartH);
-          yCursor += chartH + (legendImage ? chartGap * scale : 0);
-        }
-        if (legendImage) {
-          const legendW = baseLegendWidth * scale;
-          const legendH = naturalLegendHeight * scale;
-          doc.addImage(legendImage, 'PNG', rightContentX, yCursor, legendW, legendH);
-          yCursor += legendH;
-        }
-
-        // 6. Save the PDF
-        const filename = `report-${panelFocus.name.toLowerCase().replace(/ /g, '_')}.pdf`;
-        doc.save(filename);
-
-      } catch (error) {
-        console.error("Error exporting to PDF:", error);
-        alert("An error occurred while exporting the PDF. Please check the console for details.");
-      } finally {
-        setIsExporting(false);
+        setProgress(90, 'Finalising…');
       }
-    }); // The entire process is wrapped in the 'idle' event listener
+
+      try {
+        if (originalYear) setSelectedYear(originalYear);
+      } catch (_) { /* ignore */ }
+
+      // 6. Save the PDF
+      setProgress(98, 'Saving PDF…');
+      const filename = `report-${panelFocus.name.toLowerCase().replace(/ /g, '_')}.pdf`;
+      doc.save(filename);
+    } catch (error) {
+      console.error("Error exporting to PDF:", error);
+      alert("An error occurred while exporting the PDF. Please check the console for details.");
+    } finally {
+      setIsExporting(false);
+      setExportProgress(0);
+      setExportProgressText('');
+    }
   };
   
   // Helper to render description with dynamic keywords (precincts + years)
@@ -5075,6 +5874,34 @@ Do not invent or infer any data values, statistics, or trends.`;
                     topIndustriesByYear={selectedIndicator === 'Industry specialisation' ? topIndustriesByYear : null}
                     selectedYear={selectedYear}
                   />
+                  {/* Offscreen copy of the legend for PDF capture (kept out of scroll clipping). */}
+                  <div
+                    style={{
+                      position: 'fixed',
+                      left: '-10000px',
+                      top: '0px',
+                      width: '340px',
+                      backgroundColor: '#ffffff',
+                      pointerEvents: 'none',
+                      zIndex: -1
+                    }}
+                  >
+                    <Legend
+                      ref={legendExportRef}
+                      placement="inline"
+                      title={legendData[selectedIndicator].title}
+                      items={items}
+                      // Keep narrative minimal for export; still enables top-industries chart for specialisation.
+                      narrative={selectedIndicator === 'Industry specialisation' ? ' ' : ''}
+                      comparisonChartData={
+                        legendComparisonChartData && (selectedIndicator === 'Number of jobs' || selectedIndicator === 'Industry specialisation')
+                          ? legendComparisonChartData
+                          : null
+                      }
+                      topIndustriesByYear={selectedIndicator === 'Industry specialisation' ? topIndustriesByYear : null}
+                      selectedYear={selectedYear}
+                    />
+                  </div>
                 </>
               );
             })()}
@@ -5286,8 +6113,24 @@ Do not invent or infer any data values, statistics, or trends.`;
                 opacity: isExporting ? 0.6 : 1 
               }}
             >
-              {isExporting ? 'Exporting...' : 'Export to PDF'}
+              {isExporting ? `Exporting… ${exportProgress}%` : 'Export to PDF'}
             </button>
+            {isExporting && (
+              <div style={{ marginTop: '0.6rem' }}>
+                {exportProgressText ? (
+                  <div style={{ fontSize: '0.8rem', color: '#6B7280', marginBottom: '0.35rem' }}>{exportProgressText}</div>
+                ) : null}
+                <div style={{ width: '100%', height: '8px', backgroundColor: '#E5E7EB', borderRadius: 999, overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      width: `${Math.max(0, Math.min(100, exportProgress))}%`,
+                      height: '100%',
+                      backgroundColor: '#1D4ED8'
+                    }}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -5309,6 +6152,31 @@ Do not invent or infer any data values, statistics, or trends.`;
               <div
                 dangerouslySetInnerHTML={{
                   __html: `\n                    <div style=\"font-weight:600;color:#374151;font-size:0.95rem;margin-bottom:4px\">${title}</div>\n                    ${svg}\n                  `,
+                }}
+              />
+            );
+          })()}
+        </div>
+      )}
+
+      {panelFocus && panelFocus.type === 'indicator' && panelFocus.name === 'Industry specialisation' && (
+        <div
+          ref={specChartRef}
+          style={{ position: 'absolute', left: -10000, top: -10000, width: 280, height: 180, visibility: 'hidden' }}
+          aria-hidden="true"
+        >
+          {(() => {
+            const src = hoveredDZNSpec;
+            if (!src) return null;
+            const svg = buildSpecChartSVG(src);
+            const title = 'Industry specialisation index by year';
+            return (
+              <div
+                dangerouslySetInnerHTML={{
+                  __html: `
+                    <div style="font-weight:600;color:#374151;font-size:0.95rem;margin-bottom:4px">${title}</div>
+                    ${svg}
+                  `,
                 }}
               />
             );
