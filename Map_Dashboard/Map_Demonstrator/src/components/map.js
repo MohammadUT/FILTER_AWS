@@ -861,12 +861,12 @@ export default function Map() {
     const med2011 = fbMedians[2011];
     const med2016 = fbMedians[2016];
     const med2021 = fbMedians[2021];
-    const selectedYearLine = `In ${year}, Fishermans Bend precincts have median ${indicatorName.toLowerCase()} ${indicatorName === 'Number of jobs' ? 'value' : 'index'} of ${isFinite(selectedMedian) ? fmt(selectedMedian) : 'n/a'}, which means ${indicatorName.toLowerCase()} is ${termForValue(selectedMedian)}.`;
+    const selectedYearLine = `In ${year}, Fishermans Bend precincts have median ${indicatorName.toLowerCase()}${indicatorName === 'Number of jobs' ? '' : ' index'} of ${isFinite(selectedMedian) ? fmt(selectedMedian) : 'n/a'}, which means ${indicatorName.toLowerCase()} is ${termForValue(selectedMedian)}.`;
     const changeLineParts = [];
     if (isFinite(med2011)) changeLineParts.push(`${fmt(med2011)} in 2011`);
     if (isFinite(med2016)) changeLineParts.push(`${fmt(med2016)} in 2016`);
     if (isFinite(med2021)) changeLineParts.push(`${fmt(med2021)} in 2021`);
-    const changeLine = changeLineParts.length ? ` The median ${indicatorName.toLowerCase()} ${indicatorName === 'Number of jobs' ? 'value' : 'index'} has changed from ${changeLineParts.join(' to ')}.` : '';
+    const changeLine = changeLineParts.length ? ` The median ${indicatorName.toLowerCase()}${indicatorName === 'Number of jobs' ? '' : ' index'} has changed from ${changeLineParts.join(' to ')}.` : '';
     const firstParagraph = `${selectedYearLine}${changeLine}`.trim();
     const indicatorLabel = indicatorName.toLowerCase();
     const secondParagraph = `In ${year}, ${fbTopInfo.percentage} of Fishermans Bend precincts are classified as ${fbTopInfo.classNames} ${indicatorLabel}, compared with ${dockTopInfo.percentage} of Docklands precincts are classified as ${dockTopInfo.classNames} ${indicatorLabel}.`.trim();
@@ -4610,6 +4610,7 @@ Do not invent or infer any data values, statistics, or trends.`;
     const hasData = Array.isArray(classes) && classes.length > 0;
     // Resolve spatial scale label from metadata when available; fallback to 'DZN'
     const indicatorName = indicatorNameArg || 'Number of jobs';
+    const indicatorLower = String(indicatorName || '').toLowerCase();
     const meta = indicatorMetadata && indicatorMetadata[metadataKeyFor(indicatorName)];
     const spatialScaleFromMeta = meta && typeof meta['Spatial scale'] === 'string' ? meta['Spatial scale'] : '';
     // Prefer server-reported spatial unit when available
@@ -4642,7 +4643,7 @@ Do not invent or infer any data values, statistics, or trends.`;
     })();
 
     if (!hasData) {
-      return `The **${precinct}** precinct intersects with **0** **${spatialScale}** areas based on the **${year}** dataset. Within the precinct, ${spatialUnitPhrase} areas are classified as none. Therefore, the **${precinct}** precinct is characterised by a lowest level of **${indicatorName}**.`;
+      return `The **${precinct}** precinct intersects with **0** **${spatialScale}** areas based on the **${year}** dataset. Within the precinct, ${spatialUnitPhrase} areas are classified as none. Overall, the **${precinct}** precinct is characterised by a lowest ${indicatorLower}.`;
     }
 
     // Helper formatters
@@ -4659,9 +4660,34 @@ Do not invent or infer any data values, statistics, or trends.`;
     };
 
     // Classes are sorted by areaShare desc
-    const presentLabels = classes.map((c) => `**${c.label}**`);
     const dominant = classes[0];
     const others = classes.slice(1);
+
+    const classRank = (label) => {
+      const l = String(label || '').toLowerCase().trim();
+      if (!l) return 0;
+      // Common 5-class scheme
+      if (l === 'highest') return 50;
+      if (l === 'high') return 40;
+      if (l === 'medium') return 30;
+      if (l === 'low') return 20;
+      if (l === 'lowest') return 10;
+      // Other variants seen in some indicators
+      if (l === 'very high') return 45;
+      if (l === 'very low') return 15;
+      if (l === 'none') return 0;
+      return 0;
+    };
+
+    const presentPlainLabels = classes
+      .map((c) => String(c?.label || '').trim())
+      .filter(Boolean);
+    const uniquePresent = [...new Set(presentPlainLabels)];
+    const ranked = [...uniquePresent].sort((a, b) => classRank(b) - classRank(a));
+    const hiLabel = ranked[0] || (dominant && dominant.label) || '';
+    const loLabel = ranked[ranked.length - 1] || (dominant && dominant.label) || '';
+    const useLowestWord = /lowest/i.test(loLabel);
+    const rangeTailWord = useLowestWord ? 'lowest' : 'low';
 
     const isSingularArea = dznIntersectCount === 1;
     const areaNoun = isSingularArea ? 'area' : 'areas';
@@ -4670,19 +4696,22 @@ Do not invent or infer any data values, statistics, or trends.`;
 
     // Lead sentence per template
     const s1 = `The **${precinct}** precinct intersects with **${dznIntersectCount}** **${spatialScale}** area${dznIntersectCount === 1 ? '' : 's'} based on the **${year}** dataset.`;
-    // Classes present
-    const s2 = `Within the precinct, ${spatialUnitPhrase} ${areaNoun} ${classifyVerb} classified as ${joinList(presentLabels)}.`;
+    // Classification range (avoid listing all class labels)
+    const isSingleClass = uniquePresent.length <= 1;
+    const s2 = isSingleClass
+      ? `Within the precinct, ${spatialUnitPhrase} ${areaNoun} ${classifyVerb} classified with ${hiLabel} ${indicatorLower}.`
+      : `Within the precinct, ${spatialUnitPhrase} ${areaNoun} ${classifyVerb} classified from ${hiLabel} to ${rangeTailWord} ${indicatorLower}.`;
+    // Overall characterisation (placed before coverage details)
+    const s3 = ` Overall, the **${precinct}** precinct is characterised by a **${dominant.label}** ${indicatorLower}.`;
     // Dominant class coverage
-    const s3 = `The “**${dominant.label}**” ${areaNoun} ${coverVerb} **${fmtPct(dominant.areaShare)}%** of the precinct area.`;
+    const s4 = ` The **${dominant.label}** ${areaNoun} ${coverVerb} **${fmtPct(dominant.areaShare)}%** of the precinct area.`;
     // Contrast sentence for other classes (if any)
-    let s4 = '';
+    let s5 = '';
     if (others.length > 0) {
       const otherLabels = others.map((c) => `**${c.label}**`);
       const otherPcts = others.map((c) => `**${fmtPct(c.areaShare)}%**`);
-      s4 = ` In contrast, ${joinList(otherLabels)} account for ${joinList(otherPcts)}, respectively.`;
+      s5 = ` In contrast, ${joinList(otherLabels)} account for ${joinList(otherPcts)}, respectively.`;
     }
-    // Therefore conclusion
-    const s5 = ` Therefore, the **${precinct}** precinct is characterised by a **${dominant.label}** level of **${indicatorName}**.`;
 
     // Build change paragraph comparing medians across years using ONLY intersected areas
     const buildChangeParagraph = async () => {
@@ -4733,7 +4762,7 @@ Do not invent or infer any data values, statistics, or trends.`;
       return `The median ${indLower} ${indicatorName === 'Number of jobs' ? 'value' : 'index'} (computed from intersected areas only) has changed from ${parts.join(' to ')}.`;
     };
 
-    const firstParagraph = `${s1} ${s2} ${s3}${s4}${s5}`;
+    const firstParagraph = `${s1} ${s2}${s3}${s4}${s5}`;
     // Since buildChangeParagraph is async, return combined text via placeholder; caller handles async rendering.
     // For synchronous usage, fall back to first paragraph only and update when async result resolves elsewhere.
     // Here, we optimistically attempt to resolve synchronously if possible.
