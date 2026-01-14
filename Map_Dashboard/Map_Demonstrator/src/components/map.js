@@ -5667,6 +5667,10 @@ Do not invent or infer any data values, statistics, or trends.`;
       }
     };
     const onKwClick = (kw) => {
+      if (PRECINCT_NAMES.includes(kw)) {
+        setPanelFocus({ type: 'precinct', name: kw });
+        return;
+      }
       if (/^\d{4}$/.test(kw)) {
         const y = parseInt(kw, 10);
         const years = (availableYears && availableYears.length) ? availableYears : [2011, 2016, 2021];
