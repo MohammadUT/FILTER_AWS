@@ -861,7 +861,7 @@ export default function Map() {
     const med2011 = fbMedians[2011];
     const med2016 = fbMedians[2016];
     const med2021 = fbMedians[2021];
-    const selectedYearLine = `In ${year}, Fishermans Bend precincts have median ${indicatorName.toLowerCase()}${indicatorName === 'Number of jobs' ? '' : ' index'} of ${isFinite(selectedMedian) ? fmt(selectedMedian) : 'n/a'}, which means ${indicatorName.toLowerCase()} is ${termForValue(selectedMedian)}.`;
+    const selectedYearLine = `In ${year}, Fishermans Bend precincts have median ${indicatorName.toLowerCase()}${indicatorName === 'Number of jobs' ? '' : ' index'} of ${isFinite(selectedMedian) ? fmt(selectedMedian) : 'n/a'}, which is classified as ${termForValue(selectedMedian)}.`;
     const changeLineParts = [];
     if (isFinite(med2011)) changeLineParts.push(`${fmt(med2011)} in 2011`);
     if (isFinite(med2016)) changeLineParts.push(`${fmt(med2016)} in 2016`);
@@ -4694,6 +4694,9 @@ Do not invent or infer any data values, statistics, or trends.`;
     const classifyVerb = isSingularArea ? 'is' : 'are';
     const coverVerb = isSingularArea ? 'covers' : 'cover';
 
+    // Narrative-ready indicator label (used in coverage sentences)
+    const indicatorPhrase = indicatorLower;
+
     // Lead sentence per template
     const s1 = `The **${precinct}** precinct intersects with **${dznIntersectCount}** **${spatialScale}** area${dznIntersectCount === 1 ? '' : 's'} based on the **${year}** dataset.`;
     // Classification range (avoid listing all class labels)
@@ -4704,13 +4707,14 @@ Do not invent or infer any data values, statistics, or trends.`;
     // Overall characterisation (placed before coverage details)
     const s3 = ` Overall, the **${precinct}** precinct is characterised by a **${dominant.label}** ${indicatorLower}.`;
     // Dominant class coverage
-    const s4 = ` The **${dominant.label}** ${areaNoun} ${coverVerb} **${fmtPct(dominant.areaShare)}%** of the precinct area.`;
+    const dominantLabelLower = String(dominant.label || '').toLowerCase();
+    const s4 = ` Areas with **${dominantLabelLower}** ${indicatorPhrase} ${coverVerb} **${fmtPct(dominant.areaShare)}%** of the precinct area.`;
     // Contrast sentence for other classes (if any)
     let s5 = '';
     if (others.length > 0) {
-      const otherLabels = others.map((c) => `**${c.label}**`);
+      const otherLabels = others.map((c) => `**${String(c.label || '').toLowerCase()}**`);
       const otherPcts = others.map((c) => `**${fmtPct(c.areaShare)}%**`);
-      s5 = ` In contrast, ${joinList(otherLabels)} account for ${joinList(otherPcts)}, respectively.`;
+      s5 = ` In contrast, areas with ${joinList(otherLabels)} ${indicatorPhrase} account for ${joinList(otherPcts)}, respectively.`;
     }
 
     // Build change paragraph comparing medians across years using ONLY intersected areas
