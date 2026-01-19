@@ -1623,39 +1623,6 @@ export default function Map() {
     return `\n    <svg width="${width}" height="${height}" style="display:block;background:#fff;border:1px solid #e9ecef;border-radius:6px">\n      <text x="${pad.l - 44}" y="${(height - pad.b + pad.t) / 2}" transform="rotate(-90 ${pad.l - 44} ${(height - pad.b + pad.t) / 2})" font-size="11" text-anchor="middle" fill="#495057">Residents (count)</text>\n      ${yAxisLine}\n      ${yGrids}\n      ${xLabels}\n      ${xAxisTitle}\n      ${bars}\n    </svg>`;
   };
 
-  // Build an SVG focusing only on 2016 & 2021 residents (omit 2011) for MB-level trend clarity
-  const buildResidentsChartTwoYearSVG = (vals) => {
-    if (!vals) return '';
-    const data = [
-      { year: 2016, value: vals[2016]?.res || 0 },
-      { year: 2021, value: vals[2021]?.res || 0 }
-    ];
-    const width = 180, height = 160, pad = { l: 50, r: 10, t: 20, b: 42 };
-    const fallbackMax = Math.max(1, ...data.map(d => d.value));
-    const finiteCandidates = [mbMax, sa1ResMax, fallbackMax].filter(v => typeof v === 'number' && isFinite(v));
-    const axisMax = finiteCandidates.length ? Math.max(...finiteCandidates) : fallbackMax;
-    const yScale = (v) => pad.t + (height - pad.t - pad.b) * (1 - (axisMax ? v / axisMax : 0));
-    const xStep = (width - pad.l - pad.r) / data.length;
-    const barW = xStep * 0.45;
-    const yGrids = Array.from({ length: 5 }).map((_, i) => {
-      const v = (axisMax / 4) * i; const y = yScale(v);
-      return `\n      <g>\n        <line x1="${pad.l}" x2="${width - pad.r}" y1="${y}" y2="${y}" stroke="#f1f3f5" />\n        <text x="${pad.l - 6}" y="${y + 4}" font-size="11" text-anchor="end" fill="#6c757d">${Math.round(v).toLocaleString()}</text>\n      </g>`;
-    }).join('');
-    const yAxisLine = `\n      <line x1="${pad.l}" x2="${pad.l}" y1="${pad.t}" y2="${height - pad.b}" stroke="#adb5bd" />`;
-    const xLabels = data.map((d, idx) => `\n      <text x="${pad.l + idx * xStep + xStep / 2}" y="${height - 24}" font-size="12" text-anchor="middle" fill="#374151">${d.year}</text>`).join('');
-    const xAxisTitle = `\n      <text x="${pad.l + (width - pad.l - pad.r) / 2}" y="${height - 8}" font-size="11" text-anchor="middle" fill="#495057">Year</text>`;
-    const bars = data.map((d, idx) => {
-      const x = pad.l + idx * xStep + (xStep - barW) / 2;
-      const y = yScale(d.value);
-      let h = Math.max(0, height - pad.b - y);
-      if (d.value > 0 && h > 0 && h < 2) h = 2;
-      const isActive = selectedYear === d.year;
-      const fill = isActive ? '#2563EB' : '#94a3b8';
-      return `\n      <g>\n        <rect x="${x}" y="${y}" width="${barW}" height="${h}" fill="${fill}" rx="3" />\n        <title>${d.year}: ${Math.round(d.value).toLocaleString()}</title>\n      </g>`;
-    }).join('');
-    return `\n    <svg width="${width}" height="${height}" style="display:block;background:#fff;border:1px solid #e9ecef;border-radius:6px">\n      <text x="${pad.l - 42}" y="${(height - pad.b + pad.t) / 2}" transform="rotate(-90 ${pad.l - 42} ${(height - pad.b + pad.t) / 2})" font-size="11" text-anchor="middle" fill="#495057">Residents (count)</text>\n      ${yAxisLine}\n      ${yGrids}\n      ${xLabels}\n      ${xAxisTitle}\n      ${bars}\n    </svg>`;
-  };
-
   // Build an SVG for Dwellings (single series by year)
   const buildDwellingsChartSVG = (vals) => {
     if (!vals) return '';
@@ -2076,53 +2043,65 @@ export default function Map() {
             }
           } else if (layer.indicatorName === 'Number of residents') {
             try {
-              // Derive residents values for 2016 & 2021 by sampling SA1 combined dataset (stable codes) at the feature centroid for trend comparison.
               const c = geomCentroid(f.geometry);
               let centroidPoint = null;
               if (c) centroidPoint = { type: 'Point', coordinates: c };
-              let sa1Vals = null;
-              try {
-                const sa1Source = map.current.getSource('residents-sa1-data-source');
-                const fc = sa1Source && sa1Source._data ? sa1Source._data : null;
-                if (fc && centroidPoint) {
-                  // Simple point-in-polygon test without turf to avoid extra dependency
-                  const pointInPoly = (pt, poly) => {
-                    const [x, y] = pt.coordinates;
-                    let inside = false;
-                    const coords = poly.type === 'Polygon' ? [poly.coordinates] : poly.coordinates;
-                    coords.forEach(rings => {
-                      const ring = rings[0];
-                      for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-                        const xi = ring[i][0], yi = ring[i][1];
-                        const xj = ring[j][0], yj = ring[j][1];
-                        const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi);
-                        if (intersect) inside = !inside;
-                      }
-                    });
-                    return inside;
-                  };
+
+              // For popup trends, treat 0 as a real value (not "missing") and always render 2011/2016/2021.
+              // MB codes change by census year, so we sample each year's MB dataset at the hovered feature's centroid.
+              const pointInPoly = (pt, poly) => {
+                const [x, y] = pt.coordinates;
+                let inside = false;
+                const coords = poly.type === 'Polygon' ? [poly.coordinates] : poly.coordinates;
+                coords.forEach(rings => {
+                  const ring = rings[0];
+                  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+                    const xi = ring[i][0], yi = ring[i][1];
+                    const xj = ring[j][0], yj = ring[j][1];
+                    const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi);
+                    if (intersect) inside = !inside;
+                  }
+                });
+                return inside;
+              };
+
+              const safeNum = (raw) => {
+                const n = Number(raw);
+                return (raw === null || typeof raw === 'undefined' || !isFinite(n)) ? 0 : n;
+              };
+
+              const readMbResidentsAtCentroid = (sourceId, propName) => {
+                try {
+                  if (!centroidPoint) return null;
+                  const src = map.current.getSource(sourceId);
+                  const fc = src && src._data ? src._data : null;
+                  if (!fc || !Array.isArray(fc.features)) return null;
                   for (const feat of fc.features) {
-                    if (!feat.geometry) continue;
+                    if (!feat || !feat.geometry) continue;
                     if (pointInPoly(centroidPoint, feat.geometry)) {
-                      sa1Vals = {
-                        2016: { res: parseFloat(feat.properties?.Person_16 ?? '0') || 0 },
-                        2021: { res: parseFloat(feat.properties?.Person_21 ?? '0') || 0 }
-                      };
-                      break;
+                      return safeNum(feat.properties?.[propName]);
                     }
                   }
-                }
-              } catch (_) { /* ignore */ }
-              const vals = sa1Vals || {
-                2016: { res: parseFloat(f.properties?.Person_16 ?? '0') || 0 },
-                2021: { res: parseFloat(f.properties?.Person_21 ?? '0') || 0 }
+                } catch (_) { /* ignore */ }
+                return null;
               };
+
+              const v11 = readMbResidentsAtCentroid('mb-2011-data-source', 'Person_11');
+              const v16 = readMbResidentsAtCentroid('mb-2016-data-source', 'Person_16');
+              const v21 = readMbResidentsAtCentroid('mb-2021-data-source', 'Person_21');
+
+              const vals = {
+                2011: { res: (v11 === null ? safeNum(f.properties?.Person_11) : v11) },
+                2016: { res: (v16 === null ? safeNum(f.properties?.Person_16) : v16) },
+                2021: { res: (v21 === null ? safeNum(f.properties?.Person_21) : v21) }
+              };
+
               setHoveredMBCounts(vals);
               setHoveredDZNJobs(null);
               setHoveredDZNSpec(null);
               setHoveredSA1Lum(null);
               const title = 'Residents by year';
-              const svg = buildResidentsChartTwoYearSVG(vals);
+              const svg = buildResidentsChartSVG(vals);
               const container = document.createElement('div');
               container.style.maxWidth = '280px';
               container.innerHTML = `\n                  <div style=\"font-weight:600;color:#374151;font-size:0.95rem;margin-bottom:4px\">${title}</div>\n                  ${svg}\n                `;
@@ -2166,10 +2145,61 @@ export default function Map() {
             }
           } else if (layer.indicatorName === 'Number of dwellings') {
             try {
+              const c = geomCentroid(f.geometry);
+              let centroidPoint = null;
+              if (c) centroidPoint = { type: 'Point', coordinates: c };
+
+              // MB codes change by census year, so we sample each year's MB dataset at the hovered feature's centroid.
+              // This ensures 2016 dwellings come from the 2016 dataset (property: Dwel_16), not from the 2021 feature.
+              const pointInPoly = (pt, poly) => {
+                const [x, y] = pt.coordinates;
+                let inside = false;
+                const coords = poly.type === 'Polygon' ? [poly.coordinates] : poly.coordinates;
+                coords.forEach(rings => {
+                  const ring = rings[0];
+                  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+                    const xi = ring[i][0], yi = ring[i][1];
+                    const xj = ring[j][0], yj = ring[j][1];
+                    const intersect = ((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi);
+                    if (intersect) inside = !inside;
+                  }
+                });
+                return inside;
+              };
+
+              const safeNum = (raw) => {
+                const n = Number(raw);
+                return (raw === null || typeof raw === 'undefined' || !isFinite(n)) ? 0 : n;
+              };
+
+              const readMbAtCentroid = (sourceId, propName) => {
+                try {
+                  if (!centroidPoint) return null;
+                  const src = map.current.getSource(sourceId);
+                  const fc = src && src._data ? src._data : null;
+                  if (!fc || !Array.isArray(fc.features)) return null;
+                  for (const feat of fc.features) {
+                    if (!feat || !feat.geometry) continue;
+                    if (pointInPoly(centroidPoint, feat.geometry)) {
+                      return safeNum(feat.properties?.[propName]);
+                    }
+                  }
+                } catch (_) { /* ignore */ }
+                return null;
+              };
+
+              const p11 = readMbAtCentroid('mb-2011-data-source', 'Person_11');
+              const p16 = readMbAtCentroid('mb-2016-data-source', 'Person_16');
+              const p21 = readMbAtCentroid('mb-2021-data-source', 'Person_21');
+
+              const d11 = readMbAtCentroid('mb-2011-data-source', 'Dwell_11');
+              const d16 = readMbAtCentroid('mb-2016-data-source', 'Dwel_16');
+              const d21 = readMbAtCentroid('mb-2021-data-source', 'Dwell_21');
+
               const vals = {
-                2011: { res: parseFloat(f.properties?.Person_11 ?? '0') || 0, dwel: parseFloat(f.properties?.Dwell_11 ?? '0') || 0 },
-                2016: { res: parseFloat(f.properties?.Person_16 ?? '0') || 0, dwel: parseFloat(f.properties?.Dwel_16 ?? '0') || 0 },
-                2021: { res: parseFloat(f.properties?.Person_21 ?? '0') || 0, dwel: parseFloat(f.properties?.Dwell_21 ?? '0') || 0 }
+                2011: { res: (p11 === null ? safeNum(f.properties?.Person_11) : p11), dwel: (d11 === null ? safeNum(f.properties?.Dwell_11) : d11) },
+                2016: { res: (p16 === null ? safeNum(f.properties?.Person_16) : p16), dwel: (d16 === null ? safeNum(f.properties?.Dwel_16) : d16) },
+                2021: { res: (p21 === null ? safeNum(f.properties?.Person_21) : p21), dwel: (d21 === null ? safeNum(f.properties?.Dwell_21) : d21) }
               };
               setHoveredMBCounts(vals);
               setHoveredDZNJobs(null);
